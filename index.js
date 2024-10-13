@@ -77,7 +77,21 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
     set(value) {
         if (Object.is(this[sym_value], value)) return;
         this[sym_value] = value;
-        invalidateDerivations(this, false);
+        /** @type {Set<WeakRef<Derived>>} */
+        const derivations = this[sym_ders];
+        for (const weak_derived of derivations) {
+            const derived = weak_derived.deref();
+            /* istanbul ignore next */
+            if (derived) {
+                derived[sym_deps].delete(this);
+                delete derived[sym_value];
+                invalidateDerivations(derived, false);
+            } else {
+                /* istanbul ignore next */
+                derivations.delete(weak_derived);
+            }
+        }
+        derivations.clear();
     }
 });
 
@@ -103,20 +117,21 @@ State.prototype = StatePrototype;
 
 //#endregion State
 
-/** @param {boolean} transitive */
+/** @param {Derived} target @param {boolean} transitive */
 function invalidateDerivations(target, transitive) {
     /** @type {Map<unknown, unknown>} */
     const dependencies = target[sym_deps];
     /** @type {Set<WeakRef<Derived>>} */
     const derivations = target[sym_ders];
-    if (recursiveDerivationInvalidationGuard.has(target)) return;
+    if (
+        (dependencies.size == 0 && derivations.size == 0)
+        || recursiveDerivationInvalidationGuard.has(target)
+    ) return;
     recursiveDerivationInvalidationGuard.add(target);
-    if (dependencies) {
-        for (const dependency of dependencies.keys()) {
-            dependency[sym_ders].delete(target[sym_weak]);
-        }
-        dependencies.clear();
+    for (const dependency of dependencies.keys()) {
+        dependency[sym_ders].delete(target[sym_weak]);
     }
+    dependencies.clear();
     for (const weak_derived of derivations) {
         const derived = weak_derived.deref();
         /* istanbul ignore next */
