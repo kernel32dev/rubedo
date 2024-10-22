@@ -38,38 +38,26 @@ describe("State and Derived with caching and invalidation", () => {
         expect(derived()).toBe(30);
     });
 
-    test("Dependent derivators should not trigger if derived value does not change", () => {
-        const state = new State(10);
-        let derived1CallCount = 0;
-        const derived1 = new Derived(() => {
-            derived1CallCount++;
-            return state() > 5 ? 100 : 50;
-        });
-        
-        let derived2CallCount = 0;
-        const derived2 = new Derived(() => {
-            derived2CallCount++;
-            return derived1() + 10;
-        });
-
-        // Initial calculation
-        expect(derived2()).toBe(110);
-        expect(derived1CallCount).toBe(1);
-        expect(derived2CallCount).toBe(1);
-
-        // State changes, but derived1 value doesn't change
-        state.set(11);
-        expect(derived2()).toBe(110);
-        expect(derived1CallCount).toBe(2);
-        expect(derived2CallCount).toBe(2); // No change in derived1, so derived2 is not recalculated
-
-        // State changes, derived1 changes, and derived2 should recalculate
-        state.set(4);
-        expect(derived2()).toBe(60);
-        expect(derived1CallCount).toBe(3);
-        expect(derived2CallCount).toBe(3); // No change in derived1, so derived2 is not recalculated
-
-        // TODO! change the test above to actually test if derived2 is not called redundantly
+    test("Dependent derivators should not trigger if derived value is memoized", () => {
+        const state1 = new State<number>(0);
+        const mock2 = jest.fn(() => state1() >= 0);
+        const derived2 = new Derived(mock2);
+        const mock3 = jest.fn(() => derived2() ? "yes" : "no");
+        const derived3 = new Derived(mock3);
+        expect(mock2.mock.calls.length).toBe(0);
+        expect(mock3.mock.calls.length).toBe(0);
+        derived3();
+        expect(mock2.mock.calls.length).toBe(1);
+        expect(mock3.mock.calls.length).toBe(1);
+        state1.set(-1); derived3();
+        expect(mock2.mock.calls.length).toBe(2);
+        expect(mock3.mock.calls.length).toBe(2);
+        state1.set(1); derived3();
+        expect(mock2.mock.calls.length).toBe(3);
+        expect(mock3.mock.calls.length).toBe(3);
+        state1.set(2); derived3();
+        expect(mock2.mock.calls.length).toBe(4);
+        expect(mock3.mock.calls.length).toBe(3); // derived3 
     });
 
     test("Derived can stop depending on derives", () => {
