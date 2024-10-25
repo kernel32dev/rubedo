@@ -102,6 +102,17 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
             current_derived_used = old_derived_used;
         }
     },
+    untracked() {
+        const old_derived = current_derived;
+        const old_derived_used = current_derived_used;
+        current_derived = false;
+        try {
+            return this();
+        } finally {
+            current_derived = old_derived;
+            current_derived_used = old_derived_used;
+        }
+    },
     then(derivator) {
         const derived = this;
         return new Derived(function then() {
@@ -229,13 +240,30 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
         if (current_derived !== null) throw new Error("can't call method now inside of a derivation, call the state or call the now method outside a derivation");
         return this[sym_value];
     },
+    untracked() {
+        return this[sym_value];
+    },
     set(value) {
-        if (Object.is(this[sym_value], value)) return;
-        this[sym_value] = value;
-        forEachDerivedWeakSet(this[sym_ders], derived => {
-            derived[sym_weak] = null;
-            invalidateDerivations(derived);
-        });
+        if (!Object.is(this[sym_value], value)) {
+            this[sym_value] = value;
+            forEachDerivedWeakSet(this[sym_ders], derived => {
+                derived[sym_weak] = null;
+                invalidateDerivations(derived);
+            });
+        }
+        return value;
+    },
+    mut(transformer) {
+        if (typeof transformer != "function") throw new TypeError("transformer is not a function");
+        const value = transformer(this[sym_value]);
+        if (!Object.is(this[sym_value], value)) {
+            this[sym_value] = value;
+            forEachDerivedWeakSet(this[sym_ders], derived => {
+                derived[sym_weak] = null;
+                invalidateDerivations(derived);
+            });
+        }
+        return value;
     },
 });
 

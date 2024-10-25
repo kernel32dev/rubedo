@@ -8,7 +8,13 @@ describe("State and Derived with caching and invalidation", () => {
 
     test("State should allow updating the value", () => {
         const state = new State(5);
-        state.set(20);
+        expect(state.set(20)).toBe(20);
+        expect(state.now()).toBe(20);
+    });
+
+    test("State should allow transforming the value", () => {
+        const state = new State(5);
+        expect(state.mut(x => x * 4)).toBe(20);
         expect(state.now()).toBe(20);
     });
 

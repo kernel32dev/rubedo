@@ -4,15 +4,24 @@
  *
  * derived is updated lazily, once dependencies change, the derivator will only be executed again once the value is needed
  *
- * obtaining the value of the derived outside of a derivation throws an error, to obtain it while outside of a derivation, use the now method
+ * obtaining the value of the derived **outside** of a derivation throws an error, to obtain it while **outside** of a derivation, use the now method
  */
 export interface Derived<out T> {
     (): T;
-    /** returns the value as it is currently, use this to obtain the value of the derived outside of derivations,
+
+    /** returns the current value, use this to obtain the value of the derived while **outside** of derivations,
      *
      * using this method inside a derivation throws an error
      */
     now(): T;
+
+    /** returns the current value, works outside and inside derivations, this call does not create dependencies
+     *
+     * if it is called inside a derived and this value changes the derived will **not** be invalidated
+     *
+     * this can easily lead to bugs, don't use if you don't understand the consequences of not creating dependencies
+     */
+    untracked(): T;
 
     /** creates a new derivation using the derivator specified to transform the value */
     then<U>(derivator: (value: T) => U): Derived<U>;
@@ -41,6 +50,8 @@ export const Derived: {
     /** returns value, but if you pass a derived or state, read its value
      *
      * useful to work with `T | Derived<T>` or `Derived.Or<T>` types
+     *
+     * can only be called inside derivations
      */
     use<T>(value: T | Derived<T>): T;
 };
@@ -58,7 +69,24 @@ export namespace Derived {
  * so always use `const` no matter what, and if you need mutability, create an instance of `State` instead
  */
 export interface State<in out T> extends Derived<T> {
-    set(value: T): void;
+    /** changes the value in state, and invalidates dependents if the new value is different from the current one
+     *
+     * returns the value passed in
+     */
+    set<U extends T>(value: U): U;
+    /** computes the new value based on the function, and invalidates dependents if the new value is different from the current one
+     *
+     * this **can** be called anywhere, altough the old value is read, that read won't cause a dependency
+     *
+     * note that if you need to do a change inside of the object,
+     * like changing a property of the object or changing values of the array,
+     * there is no need to call this function,
+     * just get the object and mutate it directly,
+     * don't clone the object unless necessary
+     *
+     * returns the computed value passed in
+     */
+    mut<U extends T>(transform: (value: T) => U): U;
 }
 export const State: {
     /** creates a new state, with the value passed as the initial value,
@@ -73,7 +101,7 @@ export namespace State {
     type Or<T> = T | Derived<T> | State<T>;
 }
 
-/** calls the function asyncronously, and schedule a task to run it again if the dependencies change
+/** calls the function asyncronously, and schedule a task to run it again when the dependencies change
  *
  * if reference is an object or symbol, the affector will only be called until the reference is garbage collected
  *
