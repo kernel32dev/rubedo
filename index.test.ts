@@ -1,4 +1,4 @@
-import { Derived, ignore, react, State } from ".";
+import { Derived, affect, State } from ".";
 
 describe("State and Derived with caching and invalidation", () => {
     test("State should return the initial value", () => {
@@ -173,11 +173,11 @@ describe("type guards", () => {
     test("affector is not a function", () => {
         expect(() => {
             //@ts-expect-error
-            react(1);
+            affect(1);
         }).toThrow();
         expect(() => {
             //@ts-expect-error
-            ignore(1);
+            affect.ignore(1);
         }).toThrow();
     });
 });
@@ -227,11 +227,11 @@ describe("derivation region guards", () => {
     });
 });
 
-describe("react", () => {
-    test("reacting to State changes", async () => {
+describe("affect", () => {
+    test("affecting on State changes", async () => {
         const effects: number[] = [];
         const state = new State(0);
-        const affector = react(() => {
+        const affector = affect(() => {
             effects.push(state());
         });
         expect(effects).toEqual([0]);
@@ -241,16 +241,16 @@ describe("react", () => {
         state.set(2);
         await waitMicrotask;
         expect(effects).toEqual([0, 1, 2]);
-        ignore(affector);
+        affect.ignore(affector);
         state.set(3);
         await waitMicrotask;
         expect(effects).toEqual([0, 1, 2]);
     });
-    test("reacting to Derived changes", async () => {
+    test("affecting on Derived changes", async () => {
         const effects: string[] = [];
         const state = new State(0);
         const derived = new Derived(() => String(state()));
-        const affector = react(() => {
+        const affector = affect(() => {
             effects.push(derived());
         });
         expect(effects).toEqual(["0"]);
@@ -260,7 +260,7 @@ describe("react", () => {
         state.set(2);
         await waitMicrotask;
         expect(effects).toEqual(["0", "1", "2"]);
-        ignore(affector);
+        affect.ignore(affector);
         state.set(3);
         await waitMicrotask;
         expect(effects).toEqual(["0", "1", "2"]);

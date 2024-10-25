@@ -265,44 +265,46 @@ function State(name, value) {
 State.prototype = StatePrototype;
 
 //#endregion State
-//#region react
+//#region affect
 
-function react(affector, reference) {
+function affect(affector, reference) {
     if (typeof affector != "function") throw new TypeError("affector is not a function");
-    // TODO! automatically ignore affector if it ever runs without using any derivations
-    if (!affector[sym_react]) {
-        const react_async = function react() {
-            if (affector[sym_react_task] === false) {
-                affector[sym_react_task] = true;
-                queueMicrotask(function react() {
-                    if (!affector[sym_react] || !affector[sym_react_task]) return;
-                    affector[sym_react_task] = false;
-                    const old_derived = current_derived;
-                    const old_derived_used = current_derived_used;
-                    current_derived = affector;
-                    try {
-                        current_derived_used = false;
-                        affector();
-                        if (!current_derived_used) ignore(affector);
-                    } finally {
-                        current_derived = old_derived;
-                        current_derived_used = old_derived_used;
-                    }
-                });
-            }
-        };
-        const refs = new Set();
-        Object.defineProperty(affector, sym_pideps, { configurable: true, value: new Set() });
-        Object.defineProperty(affector, sym_weak, { configurable: true, value: new WeakRef(affector) });
-        Object.defineProperty(affector, sym_react, { configurable: true, value: react_async });
-        Object.defineProperty(affector, sym_react_refs, { configurable: true, value: refs });
-        Object.defineProperty(affector, sym_react_task, { configurable: true, writable: true, value: false });
-        reference = reference || reactiveFunctionsRefs;
-        refs.add(reference);
-        let set = reactiveFunctionsRefs.get(reference);
-        if (!set) reactiveFunctionsRefs.set(reference, set = new Set());
-        set.add(affector);
+    if (affector[sym_react]) {
+        affector[sym_react]();
+        return affector;
     }
+    const react_async = function react() {
+        if (affector[sym_react_task] === false) {
+            affector[sym_react_task] = true;
+            queueMicrotask(function react() {
+                if (!affector[sym_react] || !affector[sym_react_task]) return;
+                affector[sym_react_task] = false;
+                const old_derived = current_derived;
+                const old_derived_used = current_derived_used;
+                current_derived = affector;
+                try {
+                    current_derived_used = false;
+                    affector();
+                    if (!current_derived_used) ignore(affector);
+                } finally {
+                    current_derived = old_derived;
+                    current_derived_used = old_derived_used;
+                }
+            });
+        }
+    };
+    const refs = new Set();
+    Object.defineProperty(affector, sym_pideps, { configurable: true, value: new Set() });
+    Object.defineProperty(affector, sym_weak, { configurable: true, value: new WeakRef(affector) });
+    Object.defineProperty(affector, sym_react, { configurable: true, value: react_async });
+    Object.defineProperty(affector, sym_react_refs, { configurable: true, value: refs });
+    Object.defineProperty(affector, sym_react_task, { configurable: true, writable: true, value: false });
+    reference = reference || reactiveFunctionsRefs;
+    refs.add(reference);
+    let set = reactiveFunctionsRefs.get(reference);
+    if (!set) reactiveFunctionsRefs.set(reference, set = new Set());
+    set.add(affector);
+
     const old_derived = current_derived;
     const old_derived_used = current_derived_used;
     current_derived = affector;
@@ -316,30 +318,33 @@ function react(affector, reference) {
     }
     return affector;
 }
-function ignore(affector) {
-    if (typeof affector != "function") throw new TypeError("affector is not a function");
-    const refs = sym_react_refs[sym_react_refs];
-    delete affector[sym_react_task];
-    delete affector[sym_ders];
-    delete affector[sym_pideps];
-    delete affector[sym_weak];
-    delete affector[sym_react];
-    delete affector[sym_react_refs];
-    if (refs) {
-        for (const i of refs) {
-            /** @type {Set | undefined} */
-            const set = reactiveFunctionsRefs.get(i);
-            if (set && set.delete(affector) && set.size == 0) {
-                reactiveFunctionsRefs.delete(i);
+
+defineProperties(affect, {
+    ignore(affector) {
+        if (typeof affector != "function") throw new TypeError("affector is not a function");
+        const refs = sym_react_refs[sym_react_refs];
+        delete affector[sym_react_task];
+        delete affector[sym_ders];
+        delete affector[sym_pideps];
+        delete affector[sym_weak];
+        delete affector[sym_react];
+        delete affector[sym_react_refs];
+        if (refs) {
+            for (const i of refs) {
+                /** @type {Set | undefined} */
+                const set = reactiveFunctionsRefs.get(i);
+                if (set && set.delete(affector) && set.size == 0) {
+                    reactiveFunctionsRefs.delete(i);
+                }
             }
         }
     }
-}
+});
 
 //#endregion
 //#region invalidation
 
-/** @@param {Derived} target */
+/** @param {Derived} target */
 function invalidateDerivations(target) {
     if (target[sym_react]) {
         target[sym_react]();
@@ -392,6 +397,5 @@ module.exports = {
     __proto__: null,
     Derived,
     State,
-    react,
-    ignore,
+    affect,
 };

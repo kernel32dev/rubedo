@@ -73,15 +73,18 @@ export namespace State {
     type Or<T> = T | Derived<T> | State<T>;
 }
 
-/** calls the function asyncronously, and tracks any tracked value the inner function depends on, when these change the callback will be called again asyncronously
+/** calls the function asyncronously, and schedule a task to run it again if the dependencies change
  *
  * if reference is an object or symbol, the affector will only be called until the reference is garbage collected
  *
  * the task scheduled is a microtask, it runs on the same loop and with the same priority as promises
  *
  * returns the same function passed in
+ *
+ * calling affect twice on the same function causes the task to scheduled again, in the same manner as if its dependencies had changed
  */
-export function react<T extends () => void>(affector: T, reference?: object | symbol | null | undefined): T;
-
-/** the opposite of react, causes the affector configured with react to no longer be called when dependencies change */
-export function ignore(affector: () => void): void;
+export const affect: {
+    <T extends () => void>(affector: T, reference?: object | symbol | null | undefined): T;
+    /** the opposite of affect, causes the affector configured with affect to no longer be called when dependencies change */
+    ignore(affector: () => void): void;
+}
