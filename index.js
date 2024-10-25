@@ -1,3 +1,5 @@
+//@ts-nocheck
+"use strict";
 //#region sym
 
 /** the derivations of this object (Derived objects that depend on this), present on all objects that can be depended on such as State and Derived
@@ -6,12 +8,23 @@
  *
  * on `TrackedObject` this is always a `Record<string | sym_all, Set<WeakRef<Derived>>>` with null prototype
  *
- * on `TrackedArray` this is always a `TODO!`
+ * on `TrackedArray` this is always a `(Set<WeakRef<Derived>> | <empty>)[]` (each item represents the corresponding item in the real array by index, (shifting will invalidate later slots))
  *
  * the value is `WeakRef<Derived>` and if it matches `.deref()[sym_weak]` that means the derivation is still active
  *
  * if it does not match, this weakref can be discarded, since it was from an outdated derivation */
 const sym_ders = Symbol("ders");
+
+/** the slot based derivations of this array, present on all `TrackedArray`
+ *
+ * unlike sym_ders, shifting will **not** invalidate later slots
+ *
+ * will be used by deriving functions that do not rely on the position of the element
+ */
+const sym_slots = Symbol("slots");
+
+/** the derivations of the array's length, present on all `TrackedArray` */
+const sym_len = Symbol("len");
 
 /** the invalidated and possibly invalidated dependencies of this object, present only on Derived objects
  *
@@ -38,7 +51,10 @@ const sym_pideps = Symbol("pideps");
  */
 const sym_weak = Symbol("weak");
 
-/** the value of this object, always exists on State, and exists on Derived unless it is being actively derived or has never being derived */
+/** the value of this object, always exists on State, and exists on Derived unless it is being actively derived or has never being derived
+ *
+ * also used by `TrackedArray` to store itself not wrapped in a proxy
+ */
 const sym_value = Symbol("value");
 
 /** the derivator function of the derivator object, exists only on Derived */
@@ -63,16 +79,23 @@ const sym_react = Symbol("react");
 /** the set of references that are present in reactiveFunctionsRefs */
 const sym_react_refs = Symbol("react");
 
-/** a symbol present on tracked objects, the value is itself, useful to reobtain the proxied version of an object to avoid unecessary creation of duplicate proxies */
+/** a symbol present on tracked objects, the value is itself after tracking
+ *
+ * used to reobtain the proxied version of an object to avoid unecessary creation of duplicate proxies
+ */
 const sym_tracked = Symbol("tracked");
 
-/** a symbol used by `TrackedObject[sym_ders]` when something depends on all string properties */
+/** a symbol used by `TrackedObject[sym_ders]` when something depends on all string properties
+ *
+ * also used by `TrackedArray` to store derivations `Set<WeakRef<Derived>>` that need all values
+ */
 const sym_all = Symbol("all");
 
 //#endregion
 //#region globals
 
 /** @typedef {{ [sym_pideps]: Set<WeakRef<Derived>>, [sym_ders]: Set<WeakRef<Derived>>, [sym_weak]: WeakRef<Derived>, [sym_value]?: any }} Derived */
+/** @typedef {{ [sym_ders]: Set<WeakRef<Derived>>[], [sym_slots]: Set<WeakRef<Derived>>[], [sym_len]: Set<WeakRef<Derived>>, [sym_all]: Set<WeakRef<Derived>>, [sym_value]: TrackedArray, [sym_tracked]: TrackedArray } & any[]} TrackedArray */
 
 /** if this value is set, it is the derived currently running at the top of the stack
  *
@@ -258,7 +281,7 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
     set(value) {
         if (!Object.is(this[sym_value], value)) {
             this[sym_value] = value;
-            forEachDerivedWeakSet(this[sym_ders], invalidateDerivations);
+            invalidateDerivationSet(this[sym_ders]);
         }
         return value;
     },
@@ -267,7 +290,7 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
         const value = transformer(this[sym_value]);
         if (!Object.is(this[sym_value], value)) {
             this[sym_value] = value;
-            forEachDerivedWeakSet(this[sym_ders], invalidateDerivations);
+            invalidateDerivationSet(this[sym_ders]);
         }
         return value;
     },
@@ -379,7 +402,7 @@ defineProperties(affect, { ignore });
 //#region invalidation
 
 /** @param {Derived} target @param {boolean} [transitive] */
-function invalidateDerivations(target, transitive) {
+function invalidateDerivation(target, transitive) {
     if (target[sym_react]) {
         target[sym_react]();
         return;
@@ -393,30 +416,46 @@ function invalidateDerivations(target, transitive) {
         || recursiveDerivationInvalidationGuard.has(target)
     ) return;
     recursiveDerivationInvalidationGuard.add(target);
-    forEachDerivedWeakSet(derivations, derived => {
-        if (!weak) weak = new WeakRef(target);
-        // TODO! it is clear here that the use of has here won't stop recursive loops if WeakRef is always being recreated
-        // altough recursiveDerivationInvalidationGuard is good to have, maybe we could rely on this instead, seems more correct
-        // this would require imply some weak ref that is permanent and does not track invalidation with a null value
-        if (!derived[sym_pideps].has(weak)) {
-            derived[sym_pideps].add(weak);
-            invalidateDerivations(derived, true);
+
+    const copy = Array.from(derivations);
+    derivations.clear();
+    for (let i = 0; i < copy.length; i++) {
+        const derived = copy[i].deref();
+        /* istanbul ignore next */
+        if (derived && derived[sym_weak] === copy[i]) {
+            if (!weak) weak = new WeakRef(target);
+            // TODO! it is clear here that the use of has here won't stop recursive loops if WeakRef is always being recreated
+            // altough recursiveDerivationInvalidationGuard is good to have, maybe we could rely on this instead, seems more correct
+            // this would require imply some weak ref that is permanent and does not track invalidation with a null value
+            if (!derived[sym_pideps].has(weak)) {
+                derived[sym_pideps].add(weak);
+                invalidateDerivation(derived, true);
+            }
         }
-    });
+    }
     recursiveDerivationInvalidationGuard.delete(target);
 }
-/** @param {Set<WeakRef<Derived>>} set @param {(arg: Derived) => void} callback */
-function forEachDerivedWeakSet(set, callback) {
+/** @param {Set<WeakRef<Derived>> | undefined | null} set */
+function invalidateDerivationSet(set) {
+    if (!set) return;
     const src = Array.from(set);
     set.clear();
     for (let i = 0; i < src.length; i++) {
         const derived = src[i].deref();
         /* istanbul ignore next */
         if (derived && derived[sym_weak] === src[i]) {
-            callback(derived);
+            invalidateDerivation(derived);
         }
     }
 }
+/** @param {Set<WeakRef<Derived>>[]} arr */
+function invalidateDerivationList(arr) {
+    for (let i = 0; i < arr.length; i++) {
+        const set = arr[i];
+        invalidateDerivationSet(set);
+    }
+}
+
 
 //#endregion
 //#region utils
@@ -455,12 +494,11 @@ function track(value) {
                     enumerable: descriptor.enumerable,
                     configurable: true,
                 });
-            } else {
-                // since writable and configurable is false, we can't update the property,
-                // we can however change the way it is obtained through the proxy to return the correct tracked valued
-                // hence we would need a call to the track function in the property getter
-                // however, that might be too much of a performance hit, for such a small edge case (frozen properties), so we are not doing that for now
             }
+            // since writable and configurable is false, we can't update the property,
+            // we can however change the way it is obtained through the proxy to return the correct tracked valued
+            // hence we would need a call to the track function in the property getter
+            // however, that might be too much of a performance hit, for such a small edge case (frozen properties), so we are not doing that for now
         }
         return proxy;
     } else if (proto == Array.prototype && Array.isArray(value)) {
@@ -484,12 +522,11 @@ function track(value) {
                     enumerable: descriptor.enumerable,
                     configurable: true,
                 });
-            } else {
-                // since writable and configurable is false, we can't update the property,
-                // we can however change the way it is obtained through the proxy to return the correct tracked valued
-                // hence we would need a call to the track function in the property getter
-                // however, that might be too much of a performance hit, for such a small edge case (frozen properties), so we are not doing that for now
             }
+            // since writable and configurable is false, we can't update the property,
+            // we can however change the way it is obtained through the proxy to return the correct tracked valued
+            // hence we would need a call to the track function in the property getter
+            // however, that might be too much of a performance hit, for such a small edge case (frozen properties), so we are not doing that for now
         }
         return proxy;
     }
@@ -523,7 +560,7 @@ const TrackedObjectProxyHandler = {
         return result;
     },
     deleteProperty(target, p) {
-        if (typeof p == "string" && target in p) {
+        if (typeof p == "string" && p in target) {
             const result = Reflect.deleteProperty(target, p);
             if (result) trackedObjectInvalidate(target, p);
             return result;
@@ -576,10 +613,8 @@ const TrackedObjectProxyHandler = {
 function trackedObjectInvalidate(target, key) {
     /** @type {Record<string | sym_all, Set<WeakRef<Derived>>>} */
     const ders = target[sym_ders];
-    const ders1 = ders[key];
-    const ders2 = ders[sym_all];
-    if (ders1) forEachDerivedWeakSet(ders1, invalidateDerivations);
-    if (ders2) forEachDerivedWeakSet(ders2, invalidateDerivations);
+    invalidateDerivationSet(ders[key]);
+    invalidateDerivationSet(ders[sym_all]);
 }
 
 /** @param {string | sym_all} key */
@@ -595,25 +630,159 @@ function trackedObjectUse(target, key) {
 //#endregion
 //#region array
 
+// #region Overview
+/*
+[mutation types]
+splice
+reverse (reorder)
+sort (reorder)
+$move (reorder)
+$purge
+$transform
+
+[mutates array]
+copyWithin ($move + splice)
+$assign, $remove, {member setter}, {length setter}, pop, push, shift, unshift, fill, splice, (equivalent to a splice)
+reverse (reverse)
+sort (sort)
+$move ($move)
+$keep, $purge, $take (equivalent to a $purge)
+$transform ($transform)
+
+[returns array]
+concat
+filter
+flat
+flatMap
+map
+slice
+toReversed
+toSorted
+toSpliced
+with
+
+[returns boolean]
+every
+includes
+some
+
+[returns value]
+at
+find
+findIndex
+findLast
+findLastIndex
+indexOf
+lastIndexOf
+
+[cant optimize, reads whole array]
+forEach
+values
+entries
+toString
+toLocaleString
+join
+reduce
+reduceRight
+
+[reads length]
+keys
+*/
+// #endregion
+
 function TrackedArray(arrayLength) {
     if (typeof arrayLength != "number" && arrayLength !== undefined) {
         throw new TypeError("arrayLength is not a number");
     }
-    const value = arrayLength === undefined ? Array() : Array(arrayLength);
+    arrayLength = arrayLength || 0;
+    const value = Array(arrayLength);
     const proxy = new Proxy(value, TrackedArrayProxyHandler);
     Object.setPrototypeOf(value, (new.target && new.target.prototype && typeof new.target.prototype == "object") ? new.target.prototype : TrackedArrayPrototype);
-    //Object.defineProperty(value, sym_ders, { value: /*TODO! ?*/ });
+    Object.defineProperty(value, sym_ders, { value: Array(arrayLength) });
+    Object.defineProperty(value, sym_slots, { value: Array(arrayLength) });
+    Object.defineProperty(value, sym_len, { value: new Set() });
+    Object.defineProperty(value, sym_all, { value: new Set() });
+    Object.defineProperty(value, sym_value, { value });
     Object.defineProperty(value, sym_tracked, { value: proxy });
     return proxy;
 }
 
-const TrackedArrayPrototype = defineProperties({__proto__: Array.prototype}, {
+const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
     constructor: TrackedArray,
+    push() {
+        const target = /** @type {TrackedArray} */ (this[sym_value]);
+        if (arguments.length) {
+            Array.prototype.push.apply(target, arguments);
+            const length = target.length;
+            target[sym_ders].length = length;
+            target[sym_slots].length = length;
+            invalidateDerivationSet(target[sym_len]);
+            invalidateDerivationSet(target[sym_all]);
+        }
+        return target.length;
+    },
+    pop() {
+        const target = /** @type {TrackedArray} */ (this[sym_value]);
+        if (!target.length) return;
+        const result = Array.prototype.pop.call(target);
+        const length = target.length;
+        target[sym_ders].length = length;
+        target[sym_slots].length = length;
+        invalidateDerivationSet(target[sym_len]);
+        invalidateDerivationSet(target[sym_all]);
+        return result;
+    },
+    unshift() {
+        const target = /** @type {TrackedArray} */ (this[sym_value]);
+        if (arguments.length) {
+            Array.prototype.unshift.apply(target, arguments);
+            const args = Array(arguments.length);
+            Array.prototype.unshift.apply(target[sym_ders], args);
+            Array.prototype.unshift.apply(target[sym_slots], args);
+            invalidateDerivationList(target[sym_ders]);
+            invalidateDerivationSet(target[sym_len]);
+            invalidateDerivationSet(target[sym_all]);
+        }
+        return target.length;
+    },
+    shift() {
+        const target = /** @type {TrackedArray} */ (this[sym_value]);
+        if (!target.length) return;
+        const result = Array.prototype.shift.call(target);
+        target[sym_ders].shift();
+        target[sym_slots].shift();
+        invalidateDerivationList(target[sym_ders]);
+        invalidateDerivationSet(target[sym_len]);
+        invalidateDerivationSet(target[sym_all]);
+        return result;
+    },
+    splice() {
+        throw new Error("TODO! TrackedArray.prototype.splice");
+    },
+    sort(callback) {
+        throw new Error("TODO! TrackedArray.prototype.sort");
+    },
+    reverse() {
+        const target = /** @type {TrackedArray} */ (this[sym_value]);
+        Array.prototype.reverse.call(target);
+        target[sym_ders].reverse();
+        target[sym_slots].reverse();
+        invalidateDerivationList(target[sym_ders]);
+        invalidateDerivationSet(target[sym_len]);
+        invalidateDerivationSet(target[sym_all]);
+        return this;
+    },
+    copyWithin(dest, src, src_end) {
+        throw new Error("TODO! TrackedArray.prototype.copyWithin");
+    },
+    fill(value, start, end) {
+        throw new Error("TODO! TrackedArray.prototype.fill");
+    },
 });
 
 TrackedArray.prototype = TrackedArrayPrototype;
 
-/** @type {ProxyHandler} */
+/** @type {ProxyHandler<TrackedArray>} */
 const TrackedArrayProxyHandler = {
     //apply(target, thisArg, argArray) {
     //    return Reflect.apply(target, thisArg, argArray);
@@ -622,39 +791,214 @@ const TrackedArrayProxyHandler = {
     //    return Reflect.construct(target, thisArg, argArray);
     //},
     defineProperty(target, property, attributes) {
+        if (property === "length") {
+            if (!("value" in attributes)) throw new Error("cannot define length as a access property");
+            const new_length = as_length(attributes.value);
+            if (new_length === undefined) throw new Error("invalid length value");
+            const old_length = target.length;
+            if (new_length > old_length) {
+                target.length = new_length;
+                target[sym_ders].length = new_length;
+                target[sym_slots].length = new_length;
+                const result = Reflect.defineProperty(target, property, attributes);
+                invalidateDerivationSet(target[sym_len]);
+                invalidateDerivationSet(target[sym_all]);
+                return result;
+            } else if (new_length < old_length) {
+                const ders = target[sym_ders].slice(new_length);
+                const slots = target[sym_slots].slice(new_length);
+                target.length = new_length;
+                target[sym_ders].length = new_length;
+                target[sym_slots].length = new_length;
+                const result = Reflect.defineProperty(target, property, attributes);
+                invalidateDerivationList(ders);
+                invalidateDerivationList(slots);
+                invalidateDerivationSet(target[sym_len]);
+                invalidateDerivationSet(target[sym_all]);
+                return result;
+            } else {
+                return Reflect.defineProperty(target, property, attributes);
+            }
+        }
+        const index = as_index(property);
+        if (index !== undefined) {
+            if (!("value" in attributes)) throw new Error("cannot define an item as a access property");
+            let length_updated = false;
+            if (target.length <= index) {
+                target.length = index + 1;
+                target[sym_ders].length = index + 1;
+                target[sym_slots].length = index + 1;
+                length_updated = true;
+            }
+            const result = Reflect.defineProperty(target, property, attributes);
+            invalidateDerivationSet(target[sym_ders][index]);
+            invalidateDerivationSet(target[sym_slots][index]);
+            if (length_updated) invalidateDerivationSet(target[sym_len]);
+            invalidateDerivationSet(target[sym_all]);
+            return result;
+        }
         return Reflect.defineProperty(target, property, attributes);
     },
     deleteProperty(target, p) {
+        if (p === "length") {
+            throw new Error("cannot delete length property");
+        }
+        const index = as_index(p);
+        if (index !== undefined && index < target.length) {
+            const result = Reflect.deleteProperty(target, p);
+            invalidateDerivationSet(target[sym_ders][index]);
+            invalidateDerivationSet(target[sym_slots][index]);
+            invalidateDerivationSet(target[sym_all]);
+            return result;
+        }
         return Reflect.deleteProperty(target, p);
     },
     get(target, p, receiver) {
+        trackedArrayUseProp(target, p);
         return Reflect.get(target, p, receiver);
     },
     getOwnPropertyDescriptor(target, p) {
+        trackedArrayUseProp(target, p);
         return Reflect.getOwnPropertyDescriptor(target, p);
     },
     // getPrototypeOf(target) {
     //     return Reflect.getPrototypeOf(target);
     // },
     has(target, p) {
+        trackedArrayUseProp(target, p);
         return Reflect.has(target, p);
     },
     // isExtensible(target) {
     //     return Reflect.isExtensible(target);
     // },
     ownKeys(target) {
+        target[sym_all].add(current_derived[sym_weak]);
         return Reflect.ownKeys(target);
     },
     // preventExtensions(target) {
     //     return Reflect.preventExtensions(target);
     // },
     set(target, p, newValue, receiver) {
+        if (p === "length") {
+            const new_length = as_length(newValue);
+            if (new_length === undefined) throw new Error("invalid length value");
+            const old_length = target.length;
+            if (new_length > old_length) {
+                target.length = new_length;
+                target[sym_ders].length = new_length;
+                target[sym_slots].length = new_length;
+                const result = Reflect.set(target, p, newValue, receiver);
+                invalidateDerivationSet(target[sym_len]);
+                invalidateDerivationSet(target[sym_all]);
+                return result;
+            } else if (new_length < old_length) {
+                const ders = target[sym_ders].slice(new_length);
+                const slots = target[sym_slots].slice(new_length);
+                target.length = new_length;
+                target[sym_ders].length = new_length;
+                target[sym_slots].length = new_length;
+                const result = Reflect.set(target, p, newValue, receiver);
+                invalidateDerivationList(ders);
+                invalidateDerivationList(slots);
+                invalidateDerivationSet(target[sym_len]);
+                invalidateDerivationSet(target[sym_all]);
+                return result;
+            } else {
+                return Reflect.set(target, p, newValue, receiver);
+            }
+        }
+        const index = as_index(p);
+        if (index !== undefined) {
+            let length_updated = false;
+            if (target.length <= index) {
+                target.length = index + 1;
+                target[sym_ders].length = index + 1;
+                target[sym_slots].length = index + 1;
+                length_updated = true;
+            }
+            const result = Reflect.set(target, p, newValue, receiver);
+            invalidateDerivationSet(target[sym_ders][index]);
+            invalidateDerivationSet(target[sym_slots][index]);
+            if (length_updated) invalidateDerivationSet(target[sym_len]);
+            invalidateDerivationSet(target[sym_all]);
+            return result;
+        }
         return Reflect.set(target, p, newValue, receiver);
     },
     // setPrototypeOf(target, v) {
     //     return Reflect.setPrototypeOf(target, v);
     // },
 };
+
+/** @param {TrackedArray} target @param {string | symbol} prop   */
+function trackedArrayUseProp(target, prop) {
+    if (prop === "length") {
+        target[sym_len].add(current_derived[sym_weak]);
+        return;
+    }
+    const index = as_index(prop);
+    if (index === undefined) return;
+    const length = target.length;
+    if (index < length) {
+        target[sym_ders][index].add(current_derived[sym_weak]);
+        target[sym_slots][index].add(current_derived[sym_weak]);
+    } else {
+        target[sym_len].add(current_derived[sym_weak]);
+    }
+}
+
+//#region array helper functions
+function normalize_length(length, max) {
+    length = Math.floor(Number(length));
+    if (Number.isNaN(length)) return 0;
+    if (length < 0) return 0;
+    if (length > max) return max;
+    return length;
+}
+function normalize_start(start, length) {
+    start = Math.floor(Number(start));
+    if (Number.isNaN(start)) return 0;
+    if (start < 0) start += length;
+    if (start < 0) return 0;
+    if (start >= length) return length;
+    return start;
+}
+function normalize_end(end, length) {
+    end = Math.floor(Number(end));
+    if (Number.isNaN(end)) return 0;
+    if (end < 0) end += length;
+    if (end <= 0) return 0;
+    if (end > length) return length;
+    return end;
+}
+function default_sort(x, y) {
+    // http://www.ecma-international.org/ecma-262/6.0/#sec-sortcompare
+    const xu = x === void 0;
+    const yu = y === void 0;
+    if (xu || yu) return xu - yu;
+    x = "" + x;
+    y = "" + y;
+    if (x === y) return 0;
+    if (x > y) return 1;
+    return -1;
+}
+function as_index(key) {
+    if (typeof key == "string") {
+        const int = +key;
+        if ("" + int === key) key = int;
+    }
+    if (typeof key == "number" && key >= 0 && key <= 0xFFFFFFFE && Number.isSafeInteger(key)) return key;
+    return undefined;
+}
+function as_length(key) {
+    if (typeof key == "string") {
+        const int = +key;
+        if ("" + int === key) key = int;
+    }
+    if (typeof key == "number" && key >= 0 && key <= 0xFFFFFFFF && Number.isSafeInteger(key)) return key;
+    return undefined;
+}
+//#endregion
 
 //#endregion
 
