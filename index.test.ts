@@ -1,4 +1,4 @@
-import { Derived, affect, State } from ".";
+import { Derived, affect, State, track, TrackedObject } from ".";
 
 describe("State and Derived with caching and invalidation", () => {
     test("State should return the initial value", () => {
@@ -270,6 +270,23 @@ describe("affect", () => {
         state.set(3);
         await waitMicrotask;
         expect(effects).toEqual(["0", "1", "2"]);
+    });
+});
+
+describe("tracked object", () => {
+    test("derivation notice changes in TrackedObject", () => {
+        const obj = new TrackedObject() as { property?: number };
+        const derived = new Derived(() => obj.property);
+        expect(derived.now()).toBe(undefined);
+        obj.property = 1;
+        expect(derived.now()).toBe(1);
+    });
+    test("derivation notice changes in tracked object medwith track", () => {
+        const obj = track({}) as { property?: number };
+        const derived = new Derived(() => obj.property);
+        expect(derived.now()).toBe(undefined);
+        obj.property = 1;
+        expect(derived.now()).toBe(1);
     });
 });
 

@@ -116,3 +116,49 @@ export const affect: {
     /** the opposite of affect, causes the affector configured with affect to no longer be called when dependencies change */
     ignore(affector: () => void): void;
 }
+
+/** adds tracking to an object so leviathan can notice when it is read and written to
+ *
+ * leviathan can create dependency trees and update graphs without a compiler, but without a dedicated compilation step, it may need to give it a hand so it can do its job
+ *
+ * if something is not tracked, it means leviathan won't be able to rerun derivations when that thing changes, this can be the cause of very subtle bugs
+ *
+ * putting an object in a tracked object causes it to be also be tracked, in other it spreads to the best of its ability
+ *
+ * when tracking is first added to an object, its properties are recursively searched for more things to add tracking to
+ *
+ * the following things can be tracked:
+ *
+ * 1. **plain objects** (with default object prototype, only string properties)
+ * 2. **null prototype objects** (with default null prototype, only string properties)
+ * 3. **TrackedObject and inheritors** (automatically tracked on constructor, only string properties)
+ * 4. **plain arrays** (default array prototype and Array.isArray, only items and length) *TODO!*
+ * 5. **Map** (with default prototype, only keys, values and size) *TODO!*
+ * 6. **Set** (with default prototype, only items and size) *TODO!*
+ * 7. **Promise** (with default prototype, only the value or rejection of the promise) *TODO!*
+ *
+ * also note that some tracking requires wrapping the object in a proxy,
+ * and thus the original value may not tracked,
+ * this means references created before the call to track may be used to mutate the object without leviathan noticing
+ *
+ * ```
+ * const not_tracked = {};
+ * const tracked = track(not_tracked);
+ * // not_tracked is still not tracked
+ * ```
+ * 
+ * everything else is not tracked, user defined classes or any objects that are not plain are not tracked
+ *
+ * the return values of derivations and the values in the state class are automatically tracked
+ *
+ * tracking a value that is already tracked is a noop
+ *
+ * returns the value passed in, never throws errors
+ */
+export function track<T>(value: T): T;
+
+/** an object that is tracked, you can inherit from this to allow your custom classes to have their properties tracked */
+export const TrackedObject: {
+    new(): Object,
+    prototype: Object,
+}

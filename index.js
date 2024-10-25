@@ -2,7 +2,9 @@
 
 /** the derivations of this object (Derived objects that depend on this), present on all objects that can be depended on such as State and Derived
  *
- * this is always a `Set<WeakRef<Derived>>`
+ * on `State` and `Derived` this is always a `Set<WeakRef<Derived>>`
+ *
+ * on `TrackedObject` this is always a `Record<string | sym_all, Set<WeakRef<Derived>>>` with null prototype
  *
  * the value is `WeakRef<Derived>` and if it matches `.deref()[sym_weak]` that means the derivation is still active
  *
@@ -58,6 +60,12 @@ const sym_react = Symbol("react");
 
 /** the set of references that are present in reactiveFunctionsRefs */
 const sym_react_refs = Symbol("react");
+
+/** a symbol present on tracked objects, the value is itself, useful to reobtain the proxied version of an object to avoid unecessary creation of duplicate proxies */
+const sym_tracked = Symbol("tracked");
+
+/** a symbol used by `TrackedObject[sym_ders]` when something depends on all string properties */
+const sym_all = Symbol("all");
 
 //#endregion
 //#region globals
@@ -246,10 +254,7 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
     set(value) {
         if (!Object.is(this[sym_value], value)) {
             this[sym_value] = value;
-            forEachDerivedWeakSet(this[sym_ders], derived => {
-                derived[sym_weak] = null;
-                invalidateDerivations(derived);
-            });
+            forEachDerivedWeakSet(this[sym_ders], invalidateDerivations);
         }
         return value;
     },
@@ -258,10 +263,7 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
         const value = transformer(this[sym_value]);
         if (!Object.is(this[sym_value], value)) {
             this[sym_value] = value;
-            forEachDerivedWeakSet(this[sym_ders], derived => {
-                derived[sym_weak] = null;
-                invalidateDerivations(derived);
-            });
+            forEachDerivedWeakSet(this[sym_ders], invalidateDerivations);
         }
         return value;
     },
@@ -372,12 +374,14 @@ defineProperties(affect, {
 //#endregion
 //#region invalidation
 
-/** @param {Derived} target */
-function invalidateDerivations(target) {
+/** @param {Derived} target @param {boolean} [transitive] */
+function invalidateDerivations(target, transitive) {
     if (target[sym_react]) {
         target[sym_react]();
         return;
     }
+    let weak = target[sym_weak];
+    if (!transitive) target[sym_weak] = null;
     /** @type {Set<WeakRef<Derived>>} */
     const derivations = target[sym_ders];
     if (
@@ -385,13 +389,14 @@ function invalidateDerivations(target) {
         || recursiveDerivationInvalidationGuard.has(target)
     ) return;
     recursiveDerivationInvalidationGuard.add(target);
-    const weak = target[sym_weak] || new WeakRef(target);
     forEachDerivedWeakSet(derivations, derived => {
+        if (!weak) weak = new WeakRef(target);
         // TODO! it is clear here that the use of has here won't stop recursive loops if WeakRef is always being recreated
         // altough recursiveDerivationInvalidationGuard is good to have, maybe we could rely on this instead, seems more correct
+        // this would require imply some weak ref that is permanent and does not track invalidation with a null value
         if (!derived[sym_pideps].has(weak)) {
             derived[sym_pideps].add(weak);
-            invalidateDerivations(derived);
+            invalidateDerivations(derived, true);
         }
     });
     recursiveDerivationInvalidationGuard.delete(target);
@@ -420,10 +425,145 @@ function defineProperties(target, properties) {
 }
 
 //#endregion
+//#region track
+
+function track(value) {
+    if (!value || typeof value != "object") return value;
+    if (sym_tracked in value) return value[sym_tracked];
+    const proto = Object.getPrototypeOf(value);
+    if (proto === null || proto === Object.prototype) {
+        const proxy = new Proxy(value, TrackedObjectProxyHandler);
+        Object.defineProperty(value, sym_ders, { value: { __proto__: null } });
+        Object.defineProperty(value, sym_tracked, { value: proxy });
+        const descriptors = Object.getOwnPropertyDescriptors(value);
+        for (const key in descriptors) {
+            const descriptor = descriptors[key];
+            if (!("value" in descriptor)) continue;
+            const old_prop_value = descriptor.value;
+            const new_prop_value = track(old_prop_value);
+            if (new_prop_value === old_prop_value) continue;
+            if (descriptor.writable) {
+                value[key] = new_prop_value;
+            } else if (descriptor.configurable) {
+                Object.defineProperty(value, key, {
+                    value: new_prop_value,
+                    writable: false,
+                    enumerable: descriptor.enumerable,
+                    configurable: true,
+                });
+            } else {
+                // since writable and configurable is false, we can't update the property,
+                // we can however change the way it is obtained through the proxy to return the correct tracked valued
+                // hence the call to tracked in the property getter
+            }
+        }
+        return proxy;
+    }
+    return value;
+}
+
+//#endregion
+//#region object
+
+function TrackedObject() {
+    if (!new.target) throw new TypeError("Constructor TrackedObject requires 'new'");
+    const proxy = new Proxy(this, TrackedObjectProxyHandler);
+    Object.defineProperty(this, sym_ders, { value: { __proto__: null } });
+    Object.defineProperty(this, sym_tracked, { value: proxy });
+    return proxy;
+}
+
+TrackedObject.prototype = Object.prototype;
+
+/** @type {ProxyHandler} */
+const TrackedObjectProxyHandler = {
+    //apply(target, thisArg, argArray) {
+    //    return Reflect.apply(target, thisArg, argArray);
+    //},
+    //construct(target, thisArg, argArray) {
+    //    return Reflect.construct(target, thisArg, argArray);
+    //},
+    defineProperty(target, property, attributes) {
+        const result = Reflect.defineProperty(target, property, attributes);
+        if (result && typeof property == "string") trackedObjectInvalidate(target, property); // TODO! check if the property really did change
+        return result;
+    },
+    deleteProperty(target, p) {
+        if (typeof p == "string" && target in p) {
+            const result = Reflect.deleteProperty(target, p);
+            if (result) trackedObjectInvalidate(target, p);
+            return result;
+        } else {
+            return Reflect.deleteProperty(target, p);
+        }
+    },
+    get(target, p, receiver) {
+        if (typeof p == "string") {
+            trackedObjectUse(target, p);
+            return track(Reflect.get(target, p, receiver));
+        } else {
+            return Reflect.get(target, p, receiver);
+        }
+    },
+    getOwnPropertyDescriptor(target, p) {
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, p);
+        if (typeof p == "string" && (!descriptor || "value" in descriptor)) trackedObjectUse(target, p);
+        return descriptor;
+    },
+    // getPrototypeOf(target) {
+    //     return Reflect.getPrototypeOf(target);
+    // },
+    has(target, p) {
+        if (typeof p == "string") trackedObjectUse(target, p);
+        return Reflect.has(target, p);
+    },
+    // isExtensible(target) {
+    //     return Reflect.isExtensible(target);
+    // },
+    ownKeys(target) {
+        trackedObjectUse(target, sym_all);
+        return Reflect.ownKeys(target);
+    },
+    // preventExtensions(target) {
+    //     return Reflect.preventExtensions(target);
+    // },
+    set(target, p, newValue, receiver) {
+        const result = Reflect.set(target, p, newValue, receiver);
+        if (typeof p == "string") trackedObjectInvalidate(target, p); // TODO! check if a value property really did change
+        return result;
+    },
+    // setPrototypeOf(target, v) {
+    //     return Reflect.setPrototypeOf(target, v);
+    // },
+};
+
+/** @param {string} key */
+function trackedObjectInvalidate(target, key) {
+    /** @type {Record<string | sym_all, Set<WeakRef<Derived>>>} */
+    const ders = target[sym_ders];
+    const ders1 = ders[key];
+    const ders2 = ders[sym_all];
+    if (ders1) forEachDerivedWeakSet(ders1, invalidateDerivations);
+    if (ders2) forEachDerivedWeakSet(ders2, invalidateDerivations);
+}
+
+/** @param {string | sym_all} key */
+function trackedObjectUse(target, key) {
+    if (!current_derived) return;
+    /** @type {Record<string | sym_all, Set<WeakRef<Derived>>>} */
+    const ders = target[sym_ders];
+    let set = ders[key];
+    if (!set) ders[key] = set = new Set();
+    set.add(current_derived[sym_weak]);
+}
+
+//#endregion
 
 module.exports = {
     __proto__: null,
     Derived,
     State,
     affect,
+    track,
+    TrackedObject,
 };
