@@ -1,4 +1,4 @@
-import { Derived, State } from ".";
+import { Derived, ignore, react, State } from ".";
 
 describe("State and Derived with caching and invalidation", () => {
 
@@ -103,7 +103,7 @@ describe("State and Derived with caching and invalidation", () => {
     });
 });
 
-describe("State and Derived guards", () => {
+describe("type guards", () => {
     test("Constructor Derived requires 'new'", () => {
         expect(() => {
             //@ts-expect-error
@@ -135,4 +135,57 @@ describe("State and Derived guards", () => {
             derivedA();
         }).toThrow();
     });
+    test("affector is not a function", () => {
+        expect(() => {
+            //@ts-expect-error
+            react(1);
+        }).toThrow();
+        expect(() => {
+            //@ts-expect-error
+            ignore(1);
+        }).toThrow();
+    });
 });
+
+describe("react", () => {
+    test("reacting to State changes", async () => {
+        const effects: number[] = [];
+        const state = new State(0);
+        const affector = react(() => {
+            effects.push(state());
+        });
+        expect(effects).toEqual([0]);
+        state.set(1);
+        await waitMicrotask;
+        expect(effects).toEqual([0, 1]);
+        state.set(2);
+        await waitMicrotask;
+        expect(effects).toEqual([0, 1, 2]);
+        ignore(affector);
+        state.set(3);
+        await waitMicrotask;
+        expect(effects).toEqual([0, 1, 2]);
+    });
+    test("reacting to Derived changes", async () => {
+        const effects: string[] = [];
+        const state = new State(0);
+        const derived = new Derived(() => String(state()));
+        const affector = react(() => {
+            effects.push(derived());
+        });
+        expect(effects).toEqual(["0"]);
+        state.set(1);
+        await waitMicrotask;
+        expect(effects).toEqual(["0", "1"]);
+        state.set(2);
+        await waitMicrotask;
+        expect(effects).toEqual(["0", "1", "2"]);
+        ignore(affector);
+        state.set(3);
+        await waitMicrotask;
+        expect(effects).toEqual(["0", "1", "2"]);
+    });
+});
+
+/** await this promise to wait for all microtasks to complete */
+const waitMicrotask = Promise.resolve();

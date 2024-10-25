@@ -1,3 +1,4 @@
+//#region sym
 
 /** the derivations of this object (Derived objects that depend on this), present on all objects that can be depended on such as State and Derived
  *
@@ -39,17 +40,56 @@ const sym_value = Symbol("value");
 /** the derivator function of the derivator object, exists only on Derived */
 const sym_derivator = Symbol("derivator");
 
+/** this symbols is present when it is a reactive derivation
+ *
+ * when those derivations are invalidated, a microtask is scheduled to automatically rerun the derivator
+ *
+ * the value is a boolean, and it is true when the microtask is scheduled, and false when not
+ *
+ * if it is true, setting it to false or unsetting it can also be used to cancel the pending task
+ */
+const sym_react_task = Symbol("react task");
+
+/** this symbols is present when it is a reactive derivation
+ *
+ * this contains a function that must be called whenever a dependency of the derivation changes
+ */
+const sym_react = Symbol("react");
+
+/** the set of references that are present in reactiveFunctionsRefs */
+const sym_react_refs = Symbol("react");
+
+//#endregion
+//#region globals
+
 /** @typedef {{ [sym_pideps]: Set<WeakRef<Derived>>, [sym_ders]: Set<WeakRef<Derived>>, [sym_weak]: WeakRef<Derived>, [sym_value]?: any }} Derived */
 
 /** @type {Derived | null} */
 let current_derived = null;
 
+/** flag that is set everytime the derivation is used
+ *
+ * useful to detect when a derivation has no dependencies
+ */
+let current_derived_used = true;
+
 /** this may be unecessary because circular derivation is already being detected, but i could not prove this */
 const recursiveDerivationInvalidationGuard = new WeakSet();
 
+/** a map of references that keep reactive functions from being garbage collected */
+const reactiveFunctionsRefs = new WeakMap();
+
+//#endregion
 //#region Derived
 
-const DerivedPrototype = { __proto__: Function.prototype };
+const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
+    then(derivator) {
+        const derived = this;
+        return new Derived(function then() {
+            return derivator(derived());
+        });
+    }
+});
 
 function Derived(derivator, name) {
     if (!new.target) throw new TypeError("Constructor Derived requires 'new'");
@@ -61,6 +101,7 @@ function Derived(derivator, name) {
             if (current_derived) {
                 // add the current derivator as a derivation of myself
                 Derived[sym_ders].add(current_derived[sym_weak]);
+                current_derived_used = true;
             }
 
             if (Derived[sym_weak]) {
@@ -121,6 +162,21 @@ function Derived(derivator, name) {
     return Derived;
 }
 
+defineProperties(Derived, {
+    from(value) {
+        if (value instanceof Derived) return value;
+        const derived = function Derived() { return value; };
+        Object.setPrototypeOf(derived, DerivedPrototype);
+        Object.defineProperty(derived, sym_ders, { value: new Set() });
+        Object.defineProperty(derived, sym_pideps, { value: new Set() });
+        Object.defineProperty(derived, sym_weak, { value: new WeakRef(derived) });
+        return derived;
+    },
+    use(value) {
+        return value instanceof Derived ? value() : value;
+    },
+})
+
 Derived.prototype = DerivedPrototype;
 
 //#endregion Derived
@@ -130,13 +186,10 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
     set(value) {
         if (Object.is(this[sym_value], value)) return;
         this[sym_value] = value;
-        /** @type {Set<WeakRef<Derived>>} */
-        const derivations = this[sym_ders];
-        forEachDerivedWeakSet(derivations, derived => {
+        forEachDerivedWeakSet(this[sym_ders], derived => {
             derived[sym_weak] = null;
             invalidateDerivations(derived);
         });
-        derivations.clear();
     }
 });
 
@@ -148,6 +201,7 @@ function State(value, name) {
             if (current_derived) {
                 // add the current derivator as a derivation of myself
                 State[sym_ders].add(current_derived[sym_weak]);
+                current_derived_used = true;
             }
             return State[sym_value];
         }
@@ -161,9 +215,86 @@ function State(value, name) {
 State.prototype = StatePrototype;
 
 //#endregion State
+//#region react
+
+function react(affector, reference) {
+    if (typeof affector != "function") throw new TypeError("affector is not a function");
+    // TODO! automatically ignore affector if it ever runs without using any derivations
+    if (!affector[sym_react]) {
+        const react_async = function react() {
+            if (affector[sym_react_task] === false) {
+                affector[sym_react_task] = true;
+                queueMicrotask(function react() {
+                    if (!affector[sym_react] || !affector[sym_react_task]) return;
+                    affector[sym_react_task] = false;
+                    const old_derived = current_derived;
+                    const old_derived_used = current_derived_used;
+                    current_derived = affector;
+                    try {
+                        current_derived_used = false;
+                        affector();
+                        if (!current_derived_used) ignore(affector);
+                    } finally {
+                        current_derived = old_derived;
+                        current_derived_used = old_derived_used;
+                    }
+                });
+            }
+        };
+        const refs = new Set();
+        Object.defineProperty(affector, sym_pideps, { configurable: true, value: new Set() });
+        Object.defineProperty(affector, sym_weak, { configurable: true, value: new WeakRef(affector) });
+        Object.defineProperty(affector, sym_react, { configurable: true, value: react_async });
+        Object.defineProperty(affector, sym_react_refs, { configurable: true, value: refs });
+        Object.defineProperty(affector, sym_react_task, { configurable: true, writable: true, value: false });
+        reference = reference || reactiveFunctionsRefs;
+        refs.add(reference);
+        let set = reactiveFunctionsRefs.get(reference);
+        if (!set) reactiveFunctionsRefs.set(reference, set = new Set());
+        set.add(affector);
+    }
+    const old_derived = current_derived;
+    const old_derived_used = current_derived_used;
+    current_derived = affector;
+    try {
+        current_derived_used = false;
+        affector();
+        if (!current_derived_used) ignore(affector);
+    } finally {
+        current_derived = old_derived;
+        current_derived_used = old_derived_used;
+    }
+    return affector;
+}
+function ignore(affector) {
+    if (typeof affector != "function") throw new TypeError("affector is not a function");
+    const refs = sym_react_refs[sym_react_refs];
+    delete affector[sym_react_task];
+    delete affector[sym_ders];
+    delete affector[sym_pideps];
+    delete affector[sym_weak];
+    delete affector[sym_react];
+    delete affector[sym_react_refs];
+    if (refs) {
+        for (const i of refs) {
+            /** @type {Set | undefined} */
+            const set = reactiveFunctionsRefs.get(i);
+            if (set && set.delete(affector) && set.size == 0) {
+                reactiveFunctionsRefs.delete(i);
+            }
+        }
+    }
+}
+
+//#endregion
+//#region invalidation
 
 /** @@param {Derived} target */
 function invalidateDerivations(target) {
+    if (target[sym_react]) {
+        target[sym_react]();
+        return;
+    }
     /** @type {Set<WeakRef<Derived>>} */
     const derivations = target[sym_ders];
     if (
@@ -180,9 +311,23 @@ function invalidateDerivations(target) {
             invalidateDerivations(derived);
         }
     });
-    derivations.clear();
     recursiveDerivationInvalidationGuard.delete(target);
 }
+/** @param {Set<WeakRef<Derived>>} set @param {(arg: Derived) => void} callback */
+function forEachDerivedWeakSet(set, callback) {
+    const src = Array.from(set);
+    set.clear();
+    for (let i = 0; i < src.length; i++) {
+        const derived = src[i].deref();
+        /* istanbul ignore next */
+        if (derived && derived[sym_weak] === src[i]) {
+            callback(derived);
+        }
+    }
+}
+
+//#endregion
+//#region utils
 
 function defineProperties(target, properties) {
     for (const key in properties) {
@@ -191,23 +336,12 @@ function defineProperties(target, properties) {
     return target;
 }
 
-/** @param {Set<WeakRef<Derived>>} set @param {(arg: Derived) => void} callback */
-function forEachDerivedWeakSet(set, callback) {
-    const src = Array.from(set);
-    for (let i = 0; i < src.length; i++) {
-        const derived = src[i].deref();
-        /* istanbul ignore next */
-        if (derived && derived[sym_weak] === src[i]) {
-            callback(derived);
-        } else {
-            /* istanbul ignore next */
-            set.delete(derived);
-        }
-    }
-}
+//#endregion
 
 module.exports = {
     __proto__: null,
     Derived,
     State,
+    react,
+    ignore,
 };
