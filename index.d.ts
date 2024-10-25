@@ -22,7 +22,8 @@ export const Derived: {
      *
      * optionally you can pass a name for easier debugging, it will be available under the name property
      */
-    new <T>(derivator: () => T, name?: string): Derived<T>;
+    new <T>(derivator: () => T): Derived<T>;
+    new <T>(name: string, derivator: () => T): Derived<T>;
     prototype: Derived<any>,
 
     /** derives and obtains its current value, the dependencies are not tracked
@@ -64,7 +65,8 @@ export const State: {
      *
      * optionally you can pass a name for easier debugging, it will be available under the name property
      */
-    new <T>(value: T, name?: string): State<T>;
+    new <T>(value: T): State<T>;
+    new <T>(name: string, value: T): State<T>;
     prototype: State<any>,
 };
 export namespace State {

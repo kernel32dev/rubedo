@@ -110,10 +110,14 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
     }
 });
 
-function Derived(derivator, name) {
+function Derived(name, derivator) {
     if (!new.target) throw new TypeError("Constructor Derived requires 'new'");
+    if (arguments.length == 1) {
+        derivator = name;
+        name = "State";
+    }
     if (typeof derivator !== "function") throw new TypeError("Derivator is not a function");
-    if (typeof name !== "string" || !name) name = "Derived";
+    name = name === "State" ? derivator.name || name : name;
     /** @type {Derived} */
     const Derived = ({
         [name]() {
@@ -235,9 +239,12 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
     },
 });
 
-function State(value, name) {
+function State(name, value) {
     if (!new.target) throw new TypeError("Constructor State requires 'new'");
-    if (typeof name !== "string" || !name) name = "State";
+    if (arguments.length == 1) {
+        value = name;
+        name = "State";
+    }
     const State = ({
         [name]() {
             if (current_derived === null) throw new Error("can't call a state outside of a derivation, use the now method or call this inside a derivation");

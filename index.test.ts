@@ -60,9 +60,9 @@ describe("State and Derived with caching and invalidation", () => {
     });
 
     test("Derived can stop depending on derives", () => {
-        const state1 = new State(true, "state1");
-        const state2 = new State("yes", "state2");
-        const state3 = new State("no", "state3");
+        const state1 = new State("state1", true);
+        const state2 = new State("state2", "yes");
+        const state3 = new State("state3", "no");
 
         let derivedCallCount = 0;
         const derived = new Derived(() => {
@@ -116,7 +116,7 @@ describe("Derived static helpers", () => {
         expect(derived.name).toBe("Derived");
     });
     test("Derived.from with derived", () => {
-        const derived = Derived.from(new Derived(() => 3, "custom"));
+        const derived = Derived.from(new Derived("custom", () => 3));
         expect(derived.now()).toBe(3);
         expect(derived.name).toBe("custom");
     });
@@ -128,7 +128,7 @@ describe("Derived static helpers", () => {
     });
     test("Derived.use with derived", () => {
         Derived.now(() => {
-            const derived = Derived.use(new Derived(() => 3, "custom"));
+            const derived = Derived.use(new Derived(() => 3));
             expect(derived).toBe(3);
         });
     });
@@ -145,6 +145,10 @@ describe("type guards", () => {
         expect(() => {
             //@ts-expect-error
             new Derived(1);
+        }).toThrow();
+        expect(() => {
+            //@ts-expect-error
+            new Derived("custom", 1);
         }).toThrow();
     });
     test("Constructor State requires 'new'", () => {
