@@ -64,7 +64,13 @@ const sym_react_refs = Symbol("react");
 
 /** @typedef {{ [sym_pideps]: Set<WeakRef<Derived>>, [sym_ders]: Set<WeakRef<Derived>>, [sym_weak]: WeakRef<Derived>, [sym_value]?: any }} Derived */
 
-/** @type {Derived | null} */
+/** if this value is set, it is the derived currently running at the top of the stack
+ *
+ * if it is null, it means we are outside a derived
+ *
+ * if it is false, it means we are ignoring dependencies
+ * 
+ * @type {Derived | null | false} */
 let current_derived = null;
 
 /** flag that is set everytime the derivation is used
@@ -83,6 +89,19 @@ const reactiveFunctionsRefs = new WeakMap();
 //#region Derived
 
 const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
+    now() {
+        if (current_derived !== null) throw new Error(current_derived
+            ? "can't call method now inside of a derivation, call the derived or call the now method outside a derivation"
+            : "can't call method now inside of another call to Derived.now, call the derived or call the now method outside a derivation");
+        const old_derived_used = current_derived_used;
+        current_derived = false;
+        try {
+            return this();
+        } finally {
+            current_derived = null;
+            current_derived_used = old_derived_used;
+        }
+    },
     then(derivator) {
         const derived = this;
         return new Derived(function then() {
@@ -98,6 +117,8 @@ function Derived(derivator, name) {
     /** @type {Derived} */
     const Derived = ({
         [name]() {
+            if (current_derived === null) throw new Error("can't call a derived outside of a derivation, use the now method or call this inside a derivation");
+
             if (current_derived) {
                 // add the current derivator as a derivation of myself
                 Derived[sym_ders].add(current_derived[sym_weak]);
@@ -113,7 +134,8 @@ function Derived(derivator, name) {
                 if (pideps.size == 0) return Derived[sym_value];
                 const arr = Array.from(pideps);
                 const old_derived = current_derived;
-                current_derived = null; // this null ensures the true invalidation tests below don't add any derivations
+                const old_derived_used = current_derived_used;
+                current_derived = false; // this null ensures the true invalidation tests below don't add any derivations
                 try {
                     // this for finds all references in pideps that don't point to an invalidated derived, and stops as soon as it finds one
                     for (let i = 0; i < arr.length; i++) {
@@ -133,10 +155,12 @@ function Derived(derivator, name) {
                     }
                 } finally {
                     current_derived = old_derived;
+                    current_derived_used = old_derived_used;
                 }
                 if (pideps.size == 0) return Derived[sym_value];
             }
             const old_derived = current_derived;
+            const old_derived_used = current_derived_used;
             current_derived = Derived;
             const old_value = Derived[sym_value];
             const old_weak = Derived[sym_weak];
@@ -151,6 +175,7 @@ function Derived(derivator, name) {
                 throw e;
             } finally {
                 current_derived = old_derived;
+                current_derived_used = old_derived_used;
             }
         }
     })[name];
@@ -163,6 +188,19 @@ function Derived(derivator, name) {
 }
 
 defineProperties(Derived, {
+    now(derivator) {
+        if (current_derived !== null) throw new Error(current_derived
+            ? "can't call method now inside of a derivation, call the derived or call the now method outside a derivation"
+            : "can't call method now inside of another call to Derived.now, call the derived or call the now method outside a derivation");
+        const old_derived_used = current_derived_used;
+        current_derived = false;
+        try {
+            return derivator();
+        } finally {
+            current_derived = null;
+            current_derived_used = old_derived_used;
+        }
+    },
     from(value) {
         if (value instanceof Derived) return value;
         const derived = function Derived() { return value; };
@@ -183,6 +221,10 @@ Derived.prototype = DerivedPrototype;
 //#region State
 
 const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
+    now() {
+        if (current_derived !== null) throw new Error("can't call method now inside of a derivation, call the state or call the now method outside a derivation");
+        return this[sym_value];
+    },
     set(value) {
         if (Object.is(this[sym_value], value)) return;
         this[sym_value] = value;
@@ -190,7 +232,7 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
             derived[sym_weak] = null;
             invalidateDerivations(derived);
         });
-    }
+    },
 });
 
 function State(value, name) {
@@ -198,6 +240,7 @@ function State(value, name) {
     if (typeof name !== "string" || !name) name = "State";
     const State = ({
         [name]() {
+            if (current_derived === null) throw new Error("can't call a state outside of a derivation, use the now method or call this inside a derivation");
             if (current_derived) {
                 // add the current derivator as a derivation of myself
                 State[sym_ders].add(current_derived[sym_weak]);

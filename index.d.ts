@@ -3,14 +3,16 @@
  * to read the value, call this object
  *
  * derived is updated lazily, once dependencies change, the derivator will only be executed again once the value is needed
+ *
+ * obtaining the value of the derived outside of a derivation throws an error, to obtain it while outside of a derivation, use the now method
  */
 export interface Derived<out T> {
     (): T;
-    /** returns the value as it is currently, without letting derivations notice,
+    /** returns the value as it is currently, use this to obtain the value of the derived outside of derivations,
      *
-     * which means if this value changes derivations won't be called
+     * using this method inside a derivation throws an error
      */
-    // now(): T; // sounds like a bad time
+    now(): T;
 
     /** creates a new derivation using the derivator specified to transform the value */
     then<U>(derivator: (value: T) => U): Derived<U>;
@@ -22,6 +24,12 @@ export const Derived: {
      */
     new <T>(derivator: () => T, name?: string): Derived<T>;
     prototype: Derived<any>,
+
+    /** derives and obtains its current value, the dependencies are not tracked
+     *
+     * can only be called outside derivations
+     */
+    now<T>(derivator: () => T): T;
 
     /** if value is a derivation, return it, otherwise, wrap it in a `Derived` that will never change
      *
