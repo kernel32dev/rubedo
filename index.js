@@ -6,6 +6,8 @@
  *
  * on `TrackedObject` this is always a `Record<string | sym_all, Set<WeakRef<Derived>>>` with null prototype
  *
+ * on `TrackedArray` this is always a `TODO!`
+ *
  * the value is `WeakRef<Derived>` and if it matches `.deref()[sym_weak]` that means the derivation is still active
  *
  * if it does not match, this weakref can be discarded, since it was from an outdated derivation */
@@ -14,7 +16,7 @@ const sym_ders = Symbol("ders");
 /** the invalidated and possibly invalidated dependencies of this object, present only on Derived objects
  *
  * having a non empty set on this value means this Derived is possibly invalidated, it is possibly invalidated if any of the deriveds in this set are invalidated
- * 
+ *
  * this is always a `Set<WeakRef<Derived>>`
  *
  * the value is `WeakRef<Derived>` unlike sym_ders, it does not matter if it matches `.deref()[sym_weak]`, the point here is just to have a weak reference to the dependend object
@@ -28,10 +30,10 @@ const sym_pideps = Symbol("pideps");
  *
  * this is always a `WeakRef<Derived> | null`
  *
- * if this value is null this means this derived is invalidated and 
- * 
+ * if this value is null this means this derived is invalidated and
+ *
  * when this derive is invalidated
- * 
+ *
  * when the new value is produced, a new WeakRef is always stored
  */
 const sym_weak = Symbol("weak");
@@ -77,7 +79,7 @@ const sym_all = Symbol("all");
  * if it is null, it means we are outside a derived
  *
  * if it is false, it means we are ignoring dependencies
- * 
+ *
  * @type {Derived | null | false} */
 let current_derived = null;
 
@@ -97,6 +99,7 @@ const reactiveFunctionsRefs = new WeakMap();
 //#region Derived
 
 const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
+    constructor: Derived,
     now() {
         if (current_derived !== null) throw new Error(current_derived
             ? "can't call method now inside of a derivation, call the derived or call the now method outside a derivation"
@@ -244,6 +247,7 @@ Derived.prototype = DerivedPrototype;
 //#region State
 
 const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
+    constructor: State,
     now() {
         if (current_derived !== null) throw new Error("can't call method now inside of a derivation, call the state or call the now method outside a derivation");
         return this[sym_value];
@@ -349,27 +353,27 @@ function affect(affector, reference) {
     return affector;
 }
 
-defineProperties(affect, {
-    ignore(affector) {
-        if (typeof affector != "function") throw new TypeError("affector is not a function");
-        const refs = sym_react_refs[sym_react_refs];
-        delete affector[sym_react_task];
-        delete affector[sym_ders];
-        delete affector[sym_pideps];
-        delete affector[sym_weak];
-        delete affector[sym_react];
-        delete affector[sym_react_refs];
-        if (refs) {
-            for (const i of refs) {
-                /** @type {Set | undefined} */
-                const set = reactiveFunctionsRefs.get(i);
-                if (set && set.delete(affector) && set.size == 0) {
-                    reactiveFunctionsRefs.delete(i);
-                }
+function ignore(affector) {
+    if (typeof affector != "function") throw new TypeError("affector is not a function");
+    const refs = sym_react_refs[sym_react_refs];
+    delete affector[sym_react_task];
+    delete affector[sym_ders];
+    delete affector[sym_pideps];
+    delete affector[sym_weak];
+    delete affector[sym_react];
+    delete affector[sym_react_refs];
+    if (refs) {
+        for (const i of refs) {
+            /** @type {Set | undefined} */
+            const set = reactiveFunctionsRefs.get(i);
+            if (set && set.delete(affector) && set.size == 0) {
+                reactiveFunctionsRefs.delete(i);
             }
         }
     }
-});
+}
+
+defineProperties(affect, { ignore });
 
 //#endregion
 //#region invalidation
@@ -431,7 +435,7 @@ function track(value) {
     if (!value || typeof value != "object") return value;
     if (sym_tracked in value) return value[sym_tracked];
     const proto = Object.getPrototypeOf(value);
-    if (proto === null || proto === Object.prototype) {
+    if (!proto || proto == Object.prototype) {
         const proxy = new Proxy(value, TrackedObjectProxyHandler);
         Object.defineProperty(value, sym_ders, { value: { __proto__: null } });
         Object.defineProperty(value, sym_tracked, { value: proxy });
@@ -454,7 +458,37 @@ function track(value) {
             } else {
                 // since writable and configurable is false, we can't update the property,
                 // we can however change the way it is obtained through the proxy to return the correct tracked valued
-                // hence the call to tracked in the property getter
+                // hence we would need a call to the track function in the property getter
+                // however, that might be too much of a performance hit, for such a small edge case (frozen properties), so we are not doing that for now
+            }
+        }
+        return proxy;
+    } else if (proto == Array.prototype && Array.isArray(value)) {
+        const proxy = new Proxy(value, TrackedArrayProxyHandler);
+        Object.setPrototypeOf(value, TrackedArrayPrototype);
+        //Object.defineProperty(value, sym_ders, { value: /*TODO! ?*/ });
+        Object.defineProperty(value, sym_tracked, { value: proxy });
+        const descriptors = Object.getOwnPropertyDescriptors(value);
+        for (let key = 0; key < value.length; key++) {
+            const descriptor = descriptors[key];
+            if (!("value" in descriptor)) continue;
+            const old_prop_value = descriptor.value;
+            const new_prop_value = track(old_prop_value);
+            if (new_prop_value === old_prop_value) continue;
+            if (descriptor.writable) {
+                value[key] = new_prop_value;
+            } else if (descriptor.configurable) {
+                Object.defineProperty(value, key, {
+                    value: new_prop_value,
+                    writable: false,
+                    enumerable: descriptor.enumerable,
+                    configurable: true,
+                });
+            } else {
+                // since writable and configurable is false, we can't update the property,
+                // we can however change the way it is obtained through the proxy to return the correct tracked valued
+                // hence we would need a call to the track function in the property getter
+                // however, that might be too much of a performance hit, for such a small edge case (frozen properties), so we are not doing that for now
             }
         }
         return proxy;
@@ -500,10 +534,11 @@ const TrackedObjectProxyHandler = {
     get(target, p, receiver) {
         if (typeof p == "string") {
             trackedObjectUse(target, p);
-            return track(Reflect.get(target, p, receiver));
-        } else {
-            return Reflect.get(target, p, receiver);
+            // the line below fixes the problem outlined in the track function
+            // it is commentend out because it is called very often and may not justify the potential performance hit for fixing a very small edge case (frozen properties)
+            //return track(Reflect.get(target, p, receiver));
         }
+        return Reflect.get(target, p, receiver);
     },
     getOwnPropertyDescriptor(target, p) {
         const descriptor = Reflect.getOwnPropertyDescriptor(target, p);
@@ -558,6 +593,70 @@ function trackedObjectUse(target, key) {
 }
 
 //#endregion
+//#region array
+
+function TrackedArray(arrayLength) {
+    if (typeof arrayLength != "number" && arrayLength !== undefined) {
+        throw new TypeError("arrayLength is not a number");
+    }
+    const value = arrayLength === undefined ? Array() : Array(arrayLength);
+    const proxy = new Proxy(value, TrackedArrayProxyHandler);
+    Object.setPrototypeOf(value, (new.target && new.target.prototype && typeof new.target.prototype == "object") ? new.target.prototype : TrackedArrayPrototype);
+    //Object.defineProperty(value, sym_ders, { value: /*TODO! ?*/ });
+    Object.defineProperty(value, sym_tracked, { value: proxy });
+    return proxy;
+}
+
+const TrackedArrayPrototype = defineProperties({__proto__: Array.prototype}, {
+    constructor: TrackedArray,
+});
+
+TrackedArray.prototype = TrackedArrayPrototype;
+
+/** @type {ProxyHandler} */
+const TrackedArrayProxyHandler = {
+    //apply(target, thisArg, argArray) {
+    //    return Reflect.apply(target, thisArg, argArray);
+    //},
+    //construct(target, thisArg, argArray) {
+    //    return Reflect.construct(target, thisArg, argArray);
+    //},
+    defineProperty(target, property, attributes) {
+        return Reflect.defineProperty(target, property, attributes);
+    },
+    deleteProperty(target, p) {
+        return Reflect.deleteProperty(target, p);
+    },
+    get(target, p, receiver) {
+        return Reflect.get(target, p, receiver);
+    },
+    getOwnPropertyDescriptor(target, p) {
+        return Reflect.getOwnPropertyDescriptor(target, p);
+    },
+    // getPrototypeOf(target) {
+    //     return Reflect.getPrototypeOf(target);
+    // },
+    has(target, p) {
+        return Reflect.has(target, p);
+    },
+    // isExtensible(target) {
+    //     return Reflect.isExtensible(target);
+    // },
+    ownKeys(target) {
+        return Reflect.ownKeys(target);
+    },
+    // preventExtensions(target) {
+    //     return Reflect.preventExtensions(target);
+    // },
+    set(target, p, newValue, receiver) {
+        return Reflect.set(target, p, newValue, receiver);
+    },
+    // setPrototypeOf(target, v) {
+    //     return Reflect.setPrototypeOf(target, v);
+    // },
+};
+
+//#endregion
 
 module.exports = {
     __proto__: null,
@@ -566,4 +665,5 @@ module.exports = {
     affect,
     track,
     TrackedObject,
+    TrackedArray,
 };

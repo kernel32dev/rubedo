@@ -62,7 +62,7 @@ describe("State and Derived with caching and invalidation", () => {
         expect(mock3.mock.calls.length).toBe(3);
         state1.set(2); derived3.now();
         expect(mock2.mock.calls.length).toBe(4);
-        expect(mock3.mock.calls.length).toBe(3); // derived3 
+        expect(mock3.mock.calls.length).toBe(3); // derived3
     });
 
     test("Derived can stop depending on derives", () => {

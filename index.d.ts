@@ -132,10 +132,11 @@ export const affect: {
  * 1. **plain objects** (with default object prototype, only string properties)
  * 2. **null prototype objects** (with default null prototype, only string properties)
  * 3. **TrackedObject and inheritors** (automatically tracked on constructor, only string properties)
- * 4. **plain arrays** (default array prototype and Array.isArray, only items and length) *TODO!*
- * 5. **Map** (with default prototype, only keys, values and size) *TODO!*
- * 6. **Set** (with default prototype, only items and size) *TODO!*
- * 7. **Promise** (with default prototype, only the value or rejection of the promise) *TODO!*
+ * 4. **plain arrays** (default array prototype and Array.isArray, only items and length) *WIP!*
+ * 5. **TrackedArray and inheritors** (automatically tracked on constructor, only items and length) *WIP!*
+ * 6. **Map** (with default prototype, only keys, values and size) *TODO!*
+ * 7. **Set** (with default prototype, only items and size) *TODO!*
+ * 8. **Promise** (with default prototype, only the value or rejection of the promise) *TODO!*
  *
  * also note that some tracking requires wrapping the object in a proxy,
  * and thus the original value may not tracked,
@@ -146,7 +147,7 @@ export const affect: {
  * const tracked = track(not_tracked);
  * // not_tracked is still not tracked
  * ```
- * 
+ *
  * everything else is not tracked, user defined classes or any objects that are not plain are not tracked
  *
  * the return values of derivations and the values in the state class are automatically tracked
@@ -161,4 +162,11 @@ export function track<T>(value: T): T;
 export const TrackedObject: {
     new(): Object,
     prototype: Object,
+}
+
+/** an object that is tracked, you can inherit from this to allow your custom classes to have their properties tracked */
+export const TrackedArray: {
+    new <T = any>(arrayLength?: number): T[];
+    <T = any>(arrayLength?: number): T[];
+    readonly prototype: any[];
 }
