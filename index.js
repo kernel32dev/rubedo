@@ -60,7 +60,7 @@ const sym_value = Symbol("value");
 /** the derivator function of the derivator object, exists on Derived and on DerivedMapArray */
 const sym_derivator = Symbol("derivator");
 
-/** this symbols is present when it is a reactive derivation
+/** this symbol is present on active affector functions
  *
  * when those derivations are invalidated, a microtask is scheduled to automatically rerun the derivator
  *
@@ -68,16 +68,16 @@ const sym_derivator = Symbol("derivator");
  *
  * if it is true, setting it to false or unsetting it can also be used to cancel the pending task
  */
-const sym_react_task = Symbol("react task");
+const sym_affect_task = Symbol("affect_task");
 
-/** this symbols is present when it is a reactive derivation
+/** this symbol is present on active affector functions
  *
  * this contains a function that must be called whenever a dependency of the derivation changes
  */
-const sym_react = Symbol("react");
+const sym_affect = Symbol("affect");
 
-/** the set of references that are present in reactiveFunctionsRefs */
-const sym_react_refs = Symbol("react");
+/** the set of references that are present in affectFunctionsWeakRefs */
+const sym_affect_refs = Symbol("affect_refs");
 
 /** a symbol present on tracked objects, the value is itself after tracking
  *
@@ -119,8 +119,15 @@ let current_derived_used = true;
 /** this may be unecessary because circular derivation is already being detected, but i could not prove this */
 const recursiveDerivationInvalidationGuard = new WeakSet();
 
-/** a map of references that keep reactive functions from being garbage collected */
-const reactiveFunctionsRefs = new WeakMap();
+/** a weak map of references that keep affect functions from being garbage collected
+ *
+ * @type {WeakMap<object | symbol, Set>} */
+const affectFunctionsWeakRefs = new WeakMap();
+
+/** a strong set of `"everything"` referenced that keep affect functions from being garbage collected
+ *
+ * @type {Set} */
+const affectFunctionsRefs = new Set();
 
 //#endregion
 //#region Derived
@@ -313,25 +320,30 @@ State.prototype = StatePrototype;
 //#endregion State
 //#region affect
 
-function affect(affector, reference) {
+function affect() {
+    if (arguments.length < 2) throw new TypeError("undefined is not a function");
+    const affector = arguments[arguments.length - 1];
     if (typeof affector != "function") throw new TypeError("affector is not a function");
-    if (affector[sym_react]) {
-        affector[sym_react]();
+    const everything = arguments.length == 2 && arguments[0] === "everything";
+    const nothing = arguments.length == 2 && arguments[0] === "nothing";
+    if (affector[sym_affect]) {
+        if (!nothing) addAffectRefs(affector, everything ? null : arguments);
+        affector[sym_affect]();
         return affector;
     }
-    const react_async = function react() {
-        if (affector[sym_react_task] === false) {
-            affector[sym_react_task] = true;
-            queueMicrotask(function react() {
-                if (!affector[sym_react] || !affector[sym_react_task]) return;
-                affector[sym_react_task] = false;
+    const affect_async = function affect() {
+        if (affector[sym_affect_task] === false) {
+            affector[sym_affect_task] = true;
+            queueMicrotask(function affect() {
+                if (!affector[sym_affect] || !affector[sym_affect_task]) return;
+                affector[sym_affect_task] = false;
                 const old_derived = current_derived;
                 const old_derived_used = current_derived_used;
                 current_derived = affector;
                 try {
                     current_derived_used = null;
                     affector();
-                    if (!current_derived_used) ignore(affector);
+                    if (!current_derived_used) clearAffect(affector);
                 } finally {
                     current_derived = old_derived;
                     current_derived_used = old_derived_used;
@@ -339,17 +351,14 @@ function affect(affector, reference) {
             });
         }
     };
-    const refs = new Set();
+
     Object.defineProperty(affector, sym_pideps, { configurable: true, value: new Set() });
     Object.defineProperty(affector, sym_weak, { configurable: true, value: new WeakRef(affector) });
-    Object.defineProperty(affector, sym_react, { configurable: true, value: react_async });
-    Object.defineProperty(affector, sym_react_refs, { configurable: true, value: refs });
-    Object.defineProperty(affector, sym_react_task, { configurable: true, writable: true, value: false });
-    reference = reference || reactiveFunctionsRefs;
-    refs.add(reference);
-    let set = reactiveFunctionsRefs.get(reference);
-    if (!set) reactiveFunctionsRefs.set(reference, set = new Set());
-    set.add(affector);
+    Object.defineProperty(affector, sym_affect, { configurable: true, value: affect_async });
+    Object.defineProperty(affector, sym_affect_refs, { configurable: true, value: new Set() });
+    Object.defineProperty(affector, sym_affect_task, { configurable: true, writable: true, value: false });
+
+    if (!nothing) addAffectRefs(affector, everything ? null : arguments);
 
     const old_derived = current_derived;
     const old_derived_used = current_derived_used;
@@ -357,7 +366,7 @@ function affect(affector, reference) {
     try {
         current_derived_used = false;
         affector();
-        if (!current_derived_used) ignore(affector);
+        if (!current_derived_used) clearAffect(affector);
     } finally {
         current_derived = old_derived;
         current_derived_used = old_derived_used;
@@ -365,35 +374,59 @@ function affect(affector, reference) {
     return affector;
 }
 
-function ignore(affector) {
+/** @param {IArguments | null} references  */
+function addAffectRefs(affector, references) {
+    /** @type {Set<symbol | object>} */
+    const refs = affector[sym_affect_refs];
+    if (references) {
+        for (let i = 0; i < references.length - 1; i++) {
+            const reference = references[i];
+            refs.add(reference);
+            let set = affectFunctionsWeakRefs.get(reference);
+            if (!set) affectFunctionsWeakRefs.set(reference, set = new Set());
+
+            set.add(affector);
+        }
+    } else {
+        if (refs.size) {
+            for (const i of refs) {
+                const set = affectFunctionsWeakRefs.get(refs);
+                if (set) set.delete(affector);
+            }
+        }
+        affectFunctionsRefs.add(affector);
+    }
+}
+
+function clearAffect(affector) {
     if (typeof affector != "function") throw new TypeError("affector is not a function");
-    const refs = sym_react_refs[sym_react_refs];
-    delete affector[sym_react_task];
+    const refs = sym_affect_refs[sym_affect_refs];
+    delete affector[sym_affect_task];
     delete affector[sym_ders];
     delete affector[sym_pideps];
     delete affector[sym_weak];
-    delete affector[sym_react];
-    delete affector[sym_react_refs];
+    delete affector[sym_affect];
+    delete affector[sym_affect_refs];
     if (refs) {
         for (const i of refs) {
             /** @type {Set | undefined} */
-            const set = reactiveFunctionsRefs.get(i);
+            const set = affectFunctionsWeakRefs.get(i);
             if (set && set.delete(affector) && set.size == 0) {
-                reactiveFunctionsRefs.delete(i);
+                affectFunctionsWeakRefs.delete(i);
             }
         }
     }
 }
 
-defineProperties(affect, { ignore });
+defineProperties(affect, { clear: clearAffect });
 
 //#endregion
 //#region invalidation
 
 /** @param {Derived} target @param {boolean} [transitive] */
 function invalidateDerivation(target, transitive) {
-    if (target[sym_react]) {
-        target[sym_react]();
+    if (target[sym_affect]) {
+        target[sym_affect]();
         return;
     }
     let weak = target[sym_weak];

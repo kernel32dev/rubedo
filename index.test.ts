@@ -179,11 +179,11 @@ describe("type guards", () => {
     test("affector is not a function", () => {
         expect(() => {
             //@ts-expect-error
-            affect(1);
+            affect("everything", 1);
         }).toThrow();
         expect(() => {
             //@ts-expect-error
-            affect.ignore(1);
+            affect.clear(1);
         }).toThrow();
     });
 });
@@ -237,7 +237,7 @@ describe("affect", () => {
     test("affecting on State changes", async () => {
         const effects: number[] = [];
         const state = new State(0);
-        const affector = affect(() => {
+        const affector = affect(effects, () => {
             effects.push(state());
         });
         expect(effects).toEqual([0]);
@@ -247,7 +247,7 @@ describe("affect", () => {
         state.set(2);
         await waitMicrotask;
         expect(effects).toEqual([0, 1, 2]);
-        affect.ignore(affector);
+        affect.clear(affector);
         state.set(3);
         await waitMicrotask;
         expect(effects).toEqual([0, 1, 2]);
@@ -256,7 +256,7 @@ describe("affect", () => {
         const effects: string[] = [];
         const state = new State(0);
         const derived = new Derived(() => String(state()));
-        const affector = affect(() => {
+        const affector = affect(effects, () => {
             effects.push(derived());
         });
         expect(effects).toEqual(["0"]);
@@ -266,7 +266,7 @@ describe("affect", () => {
         state.set(2);
         await waitMicrotask;
         expect(effects).toEqual(["0", "1", "2"]);
-        affect.ignore(affector);
+        affect.clear(affector);
         state.set(3);
         await waitMicrotask;
         expect(effects).toEqual(["0", "1", "2"]);
@@ -331,7 +331,7 @@ describe("tracked array additional tests", () => {
         const arr = track([1, 2, 3]) as number[];
         const derived = new Derived(() => arr.length);
         expect(derived()).toBe(3);
-        
+
         arr.length = 0;  // Clear the array
         expect(derived()).toBe(0);
     });

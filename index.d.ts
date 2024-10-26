@@ -91,20 +91,41 @@ export namespace State {
     type Or<T> = T | Derived<T> | State<T>;
 }
 
+// TODO! explain what to pass to reference
+
 /** calls the function asyncronously, and schedule a task to run it again when the dependencies change
  *
- * if reference is an object or symbol, the affector will only be called until the reference is garbage collected
+ * the affector will keep on affecting until the affector is garbage collected or it is cleared with `affect.clear`
+ *
+ * the affecteds are a list of objects or symbols that will guarantee that the affector keeps running until they are garbage collected
+ *
+ * if affected is `"everything"` the affect will have a global strong reference and will never be garbage collected, so it will affect forever or until affect.clear is called
+ *
+ * if affected is `"nothing"` the affect will be granted no references strong or weak, making it your resposibility to ensure it does not get garbage collected
+ *
+ * note that affected is not the dependencies to the affector, but rather, the objets that are affected by your function
+ *
+ * for example, if you intend update a text node on the dom with new values whenever some derived changes, the text node is the object you must pass as the affected
+ *
+ * another example, if you intend to log something to the console, and thus you want the affect to last forever, you could pass `"everything"` or `console.log` as the affected, these would have the same effect
+ *
+ * because not adding references will likely cause the affect to be prematurely stopped, in order to create one without them you must specify it explicitly with `"nothing"` since for most cases that is not what you want and would simply be bug
+ *
+ * multiple affecteds can be passed in
  *
  * the task scheduled is a microtask, it runs on the same loop and with the same priority as promises
  *
  * returns the same function passed in
  *
  * calling affect twice on the same function causes the task to scheduled again, in the same manner as if its dependencies had changed
+ *
+ * if new affecteds are specifed on subsequent calls, then they are added
  */
 export const affect: {
-    <T extends () => void>(affector: T, reference?: object | symbol | null | undefined): T;
+    <T extends () => void>(affected: object | symbol | "everything" | "nothing", affector: T): T;
+    <T extends () => void>(...affected: [object | symbol, ...(object | symbol)[], T]): T;
     /** the opposite of affect, causes the affector configured with affect to no longer be called when dependencies change */
-    ignore(affector: () => void): void;
+    clear(affector: () => void): void;
 }
 
 /** adds tracking to an object so leviathan can notice when it is read and written to
