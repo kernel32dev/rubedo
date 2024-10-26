@@ -214,7 +214,7 @@ function Derived(name, derivator) {
             try {
                 delete Derived[sym_value];
                 Derived[sym_weak] = new WeakRef(Derived);
-                const value = Derived[sym_derivator]();
+                const value = track(Derived[sym_derivator]());
                 return Derived[sym_value] = value;
             } catch (e) {
                 Derived[sym_value] = old_value;
@@ -251,6 +251,7 @@ defineProperties(Derived, {
     },
     from(value) {
         if (value instanceof Derived) return value;
+        value = track(value);
         const derived = function Derived() { return value; };
         Object.setPrototypeOf(derived, DerivedPrototype);
         Object.defineProperty(derived, sym_ders, { value: new Set() });
@@ -259,7 +260,7 @@ defineProperties(Derived, {
         return derived;
     },
     use(value) {
-        return value instanceof Derived ? value() : value;
+        return value instanceof Derived ? value() : track(value);
     },
 })
 
@@ -275,6 +276,7 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
         return this[sym_value];
     },
     set(value) {
+        value = track(value);
         if (!Object.is(this[sym_value], value)) {
             this[sym_value] = value;
             invalidateDerivationSet(this[sym_ders]);
@@ -283,7 +285,7 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
     },
     mut(transformer) {
         if (typeof transformer != "function") throw new TypeError("transformer is not a function");
-        const value = transformer(this[sym_value]);
+        const value = track(transformer(this[sym_value]));
         if (!Object.is(this[sym_value], value)) {
             this[sym_value] = value;
             invalidateDerivationSet(this[sym_ders]);
@@ -311,7 +313,7 @@ function State(name, value) {
     })[name];
     Object.setPrototypeOf(State, typeof new.target.prototype == "object" ? new.target.prototype : StatePrototype);
     Object.defineProperty(State, sym_ders, { value: new Set() });
-    State[sym_value] = value;
+    State[sym_value] = track(value);
     return State;
 }
 
@@ -573,7 +575,10 @@ const TrackedObjectProxyHandler = {
     //},
     defineProperty(target, property, attributes) {
         const result = Reflect.defineProperty(target, property, attributes);
-        if (result && typeof property == "string") trackedObjectInvalidate(target, property); // TODO! check if the property really did change
+        if (result && typeof property == "string") {
+            if ("value" in attributes) attributes.value = track(attributes.value);
+            trackedObjectInvalidate(target, property); // TODO! check if the property really did change
+        }
         return result;
     },
     deleteProperty(target, p) {
@@ -617,6 +622,7 @@ const TrackedObjectProxyHandler = {
     //     return Reflect.preventExtensions(target);
     // },
     set(target, p, newValue, receiver) {
+        if (typeof p == "string") newValue = track(newValue);
         const result = Reflect.set(target, p, newValue, target);
         if (typeof p == "string") trackedObjectInvalidate(target, p); // TODO! check if a value property really did change
         return result;
@@ -730,6 +736,9 @@ const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
     push() {
         const target = /** @type {TrackedArray} */ (this[sym_value]);
         if (arguments.length) {
+            for (let i = 0; i < arguments.length - 1; i++) {
+                arguments[i] = track(arguments[i]);
+            }
             Array.prototype.push.apply(target, arguments);
             const length = target.length;
             target[sym_ders].length = length;
@@ -753,6 +762,9 @@ const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
     unshift() {
         const target = /** @type {TrackedArray} */ (this[sym_value]);
         if (arguments.length) {
+            for (let i = 0; i < arguments.length - 1; i++) {
+                arguments[i] = track(arguments[i]);
+            }
             Array.prototype.unshift.apply(target, arguments);
             const args = Array(arguments.length);
             Array.prototype.unshift.apply(target[sym_ders], args);
@@ -849,6 +861,7 @@ const TrackedArrayProxyHandler = {
         const index = as_index(property);
         if (index !== undefined) {
             if (!("value" in attributes)) throw new Error("cannot define an item as a access property");
+            attributes.value = track(attributes.value);
             let length_updated = false;
             if (target.length <= index) {
                 target.length = index + 1;
@@ -935,6 +948,7 @@ const TrackedArrayProxyHandler = {
         }
         const index = as_index(p);
         if (index !== undefined) {
+            newValue = track(newValue);
             let length_updated = false;
             if (target.length <= index) {
                 target.length = index + 1;
@@ -1103,6 +1117,7 @@ function derivedMapArrayGet(target, index) {
     //};
     const cached = new Derived(() => {
         if (current_derived) set.add(current_derived[sym_weak]);
+        // TODO! index
         return target[sym_derivator](target[sym_src][index], () => NaN, target[sym_src][sym_tracked]);
     });
     cache.set(set, cached);

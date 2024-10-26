@@ -25,10 +25,7 @@ export const Derived: {
     new <T>(name: string, derivator: () => T): Derived<T>;
     prototype: Derived<any>,
 
-    /** derives and obtains its current value, the dependencies are not tracked
-     *
-     * can only be called outside derivations
-     */
+    /** derives and obtains its current value, the dependencies are not tracked */
     now<T>(derivator: () => T): T;
 
     /** if value is a derivation, return it, otherwise, wrap it in a `Derived` that will never change
@@ -40,8 +37,6 @@ export const Derived: {
     /** returns value, but if you pass a derived or state, read its value
      *
      * useful to work with `T | Derived<T>` or `Derived.Or<T>` types
-     *
-     * can only be called inside derivations
      */
     use<T>(value: T | Derived<T>): T;
 };
@@ -187,8 +182,6 @@ declare global {
         /** creates a new mapped array, whose values are automatically kept up to date, by calling the function whenever dependencies change and are needed
          *
          * the `$` indicates this is a derived function that works with derived objects, and may not be exactly equivalent to their non deriving counterparts
-         *
-         * can be called inside and outside derivations
          *
          * method added by leviathan-state
          */
