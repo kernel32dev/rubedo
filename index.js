@@ -214,7 +214,7 @@ function Derived(name, derivator) {
             try {
                 delete Derived[sym_value];
                 Derived[sym_weak] = new WeakRef(Derived);
-                const value = track(Derived[sym_derivator]());
+                const value = track(derivator());
                 return Derived[sym_value] = value;
             } catch (e) {
                 Derived[sym_value] = old_value;
@@ -230,7 +230,6 @@ function Derived(name, derivator) {
     Object.defineProperty(Derived, sym_ders, { value: new Set() });
     Object.defineProperty(Derived, sym_pideps, { value: new Set() });
     Object.defineProperty(Derived, sym_weak, { writable: true, value: null });
-    Object.defineProperty(Derived, sym_derivator, { value: derivator });
     return Derived;
 }
 
@@ -547,7 +546,7 @@ function track(value) {
             // hence we would need a call to the track function in the property getter
             // however, that might be too much of a performance hit, for such a small edge case (frozen properties), so we are not doing that for now
         }
-        return createTrackedArray(value, TrackedArrayPrototype, TrackedArrayProxyHandler);
+        return createTrackedArray(value, TrackedArrayPrototype);
     }
     return value;
 }
@@ -556,12 +555,28 @@ function track(value) {
 //#region object
 
 function TrackedObject() {
-    if (!new.target) throw new TypeError("Constructor TrackedObject requires 'new'");
-    const proxy = new Proxy(this, TrackedObjectProxyHandler);
-    Object.defineProperty(this, sym_ders, { value: { __proto__: null } });
-    Object.defineProperty(this, sym_tracked, { value: proxy });
+    const value = new.target ? this : {};
+    const proxy = new Proxy(value, TrackedObjectProxyHandler);
+    Object.defineProperty(value, sym_ders, { value: { __proto__: null } });
+    Object.defineProperty(value, sym_tracked, { value: proxy });
     return proxy;
 }
+
+defineProperties(TrackedObject, {
+    [Symbol.hasInstance](target) {
+        return target && typeof target == "object" && sym_tracked in target;
+    },
+    use(target) {
+        if (!target || typeof target !== "object") throw new TypeError("target must be an object");
+        if (!current_derived) return;
+        const ders = target[sym_ders];
+        if (!ders) return;
+        let set = ders[sym_all];
+        if (!set) ders[sym_all] = set = new Set();
+        set.add(current_derived[sym_weak]);
+        current_derived_used = true;
+    }
+});
 
 TrackedObject.prototype = Object.prototype;
 
@@ -713,11 +728,12 @@ keys
 */
 // #endregion
 
-function createTrackedArray(value, prototype, proxyHandler) {
-    const proxy = new Proxy(value, proxyHandler);
+function createTrackedArray(value, prototype) {
+    const proxy = new Proxy(value, TrackedArrayProxyHandler);
+    const length = value.length || 0;
     Object.setPrototypeOf(value, prototype);
-    Object.defineProperty(value, sym_ders, { value: Array(value.length) });
-    Object.defineProperty(value, sym_slots, { value: Array(value.length) });
+    Object.defineProperty(value, sym_ders, { value: Array(length) });
+    Object.defineProperty(value, sym_slots, { value: Array(length) });
     Object.defineProperty(value, sym_len, { value: new Set() });
     Object.defineProperty(value, sym_all, { value: new Set() });
     Object.defineProperty(value, sym_value, { value });
@@ -727,9 +743,22 @@ function createTrackedArray(value, prototype, proxyHandler) {
 
 function TrackedArray(arrayLength) {
     if (typeof arrayLength != "number" && arrayLength !== undefined) throw new TypeError("arrayLength is not a number");
-    const prototype = (new.target && new.target.prototype && typeof new.target.prototype == "object") ? new.target.prototype : TrackedArrayPrototype;
-    return createTrackedArray(Array(arrayLength || 0), prototype, TrackedArrayProxyHandler);
+    const prototype = (constructor && constructor.prototype && typeof constructor.prototype == "object") ? constructor.prototype : TrackedArrayPrototype;
+    return createTrackedArray(arrayLength, prototype);
 }
+
+defineProperties(TrackedArray, {
+    [Symbol.hasInstance](target) {
+        return Array.isArray(target) && sym_tracked in target;
+    },
+    use(target) {
+        if (!target || typeof target !== "object" || !Array.isArray(target)) throw new TypeError("target must be an array");
+        if (!current_derived || !(sym_len in target)) return;
+        while (sym_src in target) target = target[sym_src];
+        target[sym_all].add(current_derived[sym_weak]);
+        current_derived_used = true;
+    },
+});
 
 const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
     constructor: TrackedArray,
@@ -810,11 +839,7 @@ const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
     },
 
     $map(derivator, thisArg) {
-        const value = Array();
-        Object.defineProperty(value, sym_src, { value: this[sym_value] });
-        Object.defineProperty(value, sym_derivator, { value: derivator.bind(thisArg) });
-        Object.defineProperty(value, sym_cache, { value: new WeakMap() });
-        return createTrackedArray(value, DerivedArrayPrototype, DerivedMapArrayProxyHandler);
+        return DerivedMapArray(this, derivator, thisArg);
     },
 });
 
@@ -997,18 +1022,19 @@ function trackedArrayUseProp(target, prop) {
     }
 }
 
-//#region derived array definitions
+//#region DerivedArray
 
 function mutationOnDerivedArray() {
     throw new TypeError("cannot mutate derived array");
 }
 
 function DerivedArray(arrayLength) {
-    // same exact code as TrackedArray, returns TrackedArray instances and not DerivedArray instances,
-    // but under a function with a different name for better debugging
+    // return TrackedArray instances and not DerivedArray instances,
+    // this serves as a constructor with a different name for the DerivedArrayPrototype for better debugging
+    // we return TrackedArray here to allow deep clones, jest needs it and possibly other libraries too
     if (typeof arrayLength != "number" && arrayLength !== undefined) throw new TypeError("arrayLength is not a number");
-    const prototype = (new.target && new.target.prototype && typeof new.target.prototype == "object") ? new.target.prototype : TrackedArrayPrototype;
-    return createTrackedArray(Array(arrayLength || 0), prototype, TrackedArrayProxyHandler);
+    const prototype = (constructor && constructor.prototype && typeof constructor.prototype == "object") ? constructor.prototype : TrackedArrayPrototype;
+    return createTrackedArray(arrayLength, prototype);
 }
 
 const DerivedArrayPrototype = defineProperties({ __proto__: TrackedArrayPrototype }, {
@@ -1038,6 +1064,23 @@ const DerivedArrayProxyHandler = {
 //#endregion
 
 //#region DerivedMapArray
+
+function DerivedMapArray(src, derivator, thisArg) {
+    const value = Array();
+    const proxy = new Proxy(value, DerivedMapArrayProxyHandler);
+    Object.setPrototypeOf(value, DerivedArrayPrototype);
+    Object.defineProperty(value, sym_ders, { value: src[sym_ders] });
+    Object.defineProperty(value, sym_slots, { value: src[sym_slots] });
+    Object.defineProperty(value, sym_len, { value: src[sym_len] });
+    Object.defineProperty(value, sym_all, { value: src[sym_all] });
+    Object.defineProperty(value, sym_value, { value });
+    Object.defineProperty(value, sym_tracked, { value: proxy });
+
+    Object.defineProperty(value, sym_src, { value: src });
+    Object.defineProperty(value, sym_derivator, { value: derivator.bind(thisArg) });
+    Object.defineProperty(value, sym_cache, { value: new WeakMap() });
+    return proxy;
+}
 
 /** @typedef {TrackedArray & {[sym_src]: TrackedArray, [sym_derivator](value: T, index: Derived, array: T[]): U, [sym_cache]: WeakMap<Set<WeakKey<Derived>>, Derived>}} DerivedMapArray */
 
@@ -1115,10 +1158,21 @@ function derivedMapArrayGet(target, index) {
     //    if (current_derived) fixed_set.add(current_derived[sym_weak]);
     //    return index;
     //};
+
+    // TODO! implement the index derived in the call to the mapper function below
+
+    // Derived.from
+    // const derived = function Derived() { return value; };
+    // Object.setPrototypeOf(derived, DerivedPrototype);
+    // Object.defineProperty(derived, sym_ders, { value: new Set() });
+    // Object.defineProperty(derived, sym_pideps, { value: new Set() });
+    // Object.defineProperty(derived, sym_weak, { value: new WeakRef(derived) });
+    // return derived;
+
     const cached = new Derived(() => {
         if (current_derived) set.add(current_derived[sym_weak]);
         // TODO! index
-        return target[sym_derivator](target[sym_src][index], () => NaN, target[sym_src][sym_tracked]);
+        return target[sym_derivator](target[sym_src][index], Derived.from(NaN), target[sym_src][sym_tracked]);
     });
     cache.set(set, cached);
     return cached();

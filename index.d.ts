@@ -88,7 +88,7 @@ export namespace State {
 
 // TODO! explain what to pass to reference
 
-/** calls the function asyncronously, and schedule a task to run it again when the dependencies change
+/** calls the function syncronously, and schedule a task to run it again when the dependencies change
  *
  * the affector will keep on affecting until the affector is garbage collected or it is cleared with `affect.clear`
  *
@@ -164,16 +164,27 @@ export const affect: {
  */
 export function track<T>(value: T): T;
 
-/** an object that is tracked, you can inherit from this to allow your custom classes to have their properties tracked */
+/** an object that is tracked, changes to it can be noticed by derivations that use it
+ *
+ * you can inherit from this to allow your custom classes to have their properties tracked */
 export const TrackedObject: {
     new(): Object,
+    (): Object,
+    /** use the entire object, the current derivator will rerun if anything in the object changes
+     *
+     * this can be used as an optimization to avoid adding dependencies on each and every property individually by using `Derived.now` while still being correct */
+    use(target: object): void;
     prototype: Object,
 }
 
-/** an object that is tracked, you can inherit from this to allow your custom classes to have their properties tracked */
+/** an array that is tracked, changes to it can be noticed by derivations that use it */
 export const TrackedArray: {
     new <T = any>(arrayLength?: number): T[];
     <T = any>(arrayLength?: number): T[];
+    /** use the entire array, the current derivator will rerun if anything in the array changes
+     *
+     * this can be used as an optimization to avoid adding dependencies on each and every item individually by using `Derived.now` while still being correct */
+    use(target: unknown[]): void;
     readonly prototype: any[];
 }
 
@@ -182,6 +193,8 @@ declare global {
         /** creates a new mapped array, whose values are automatically kept up to date, by calling the function whenever dependencies change and are needed
          *
          * the `$` indicates this is a derived function that works with derived objects, and may not be exactly equivalent to their non deriving counterparts
+         *
+         * attempting to mutate the resulting array directly will throw errors
          *
          * method added by leviathan-state
          */

@@ -324,6 +324,18 @@ describe("tracked array", () => {
         expect([...derived]).toEqual(["3", "1", "2"]);
         expect(mock.mock.calls.length).toBe(4);
     });
+    test("double derived map works", () => {
+        const arr = track([0, 1, 2]) as number[];
+        const mock = jest.fn(String);
+        const derived = arr.$map(mock).$map(Number);
+        expect(mock.mock.calls.length).toBe(0);
+        expect([...derived]).toEqual([0, 1, 2]);
+        expect(mock.mock.calls.length).toBe(3);
+        arr[0] = 3;
+        expect(mock.mock.calls.length).toBe(3);
+        expect([...derived]).toEqual([3, 1, 2]);
+        expect(mock.mock.calls.length).toBe(4);
+    });
 });
 
 describe("tracked array additional tests", () => {
