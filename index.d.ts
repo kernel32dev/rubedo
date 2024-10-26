@@ -3,25 +3,15 @@
  * to read the value, call this object
  *
  * derived is updated lazily, once dependencies change, the derivator will only be executed again once the value is needed
- *
- * obtaining the value of the derived **outside** of a derivation throws an error, to obtain it while **outside** of a derivation, use the now method
  */
 export interface Derived<out T> {
     (): T;
 
-    /** returns the current value, use this to obtain the value of the derived while **outside** of derivations,
-     *
-     * using this method inside a derivation throws an error
-     */
-    now(): T;
-
-    /** returns the current value, works outside and inside derivations, this call does not create dependencies
+    /** returns the current value, this call does not create dependencies
      *
      * if it is called inside a derived and this value changes the derived will **not** be invalidated
-     *
-     * this can easily lead to bugs, don't use if you don't understand the consequences of not creating dependencies
      */
-    untracked(): T;
+    now(): T;
 
     /** creates a new derivation using the derivator specified to transform the value */
     then<U>(derivator: (value: T) => U): Derived<U>;
@@ -169,4 +159,19 @@ export const TrackedArray: {
     new <T = any>(arrayLength?: number): T[];
     <T = any>(arrayLength?: number): T[];
     readonly prototype: any[];
+}
+
+declare global {
+    interface Array<T> {
+        /** creates a new mapped array, whose values are automatically kept up to date, by calling the function whenever dependencies change and are needed
+         *
+         * the `$` indicates this is a derived function that works with derived objects, and may not be exactly equivalent to their non deriving counterparts
+         *
+         * can be called inside and outside derivations
+         *
+         * method added by leviathan-state
+         */
+        $map<U>(derivator: (value: T, index: Derived<number>, array: T[]) => U): U[];
+        $map<U, This>(derivator: (this: This, value: T, index: Derived<number>, array: T[]) => U, thisArg: This): U[];
+    }
 }

@@ -1,6 +1,6 @@
 //@ts-nocheck
 "use strict";
-//#region sym
+//#region symbols
 
 /** the derivations of this object (Derived objects that depend on this), present on all objects that can be depended on such as State and Derived
  *
@@ -57,7 +57,7 @@ const sym_weak = Symbol("weak");
  */
 const sym_value = Symbol("value");
 
-/** the derivator function of the derivator object, exists only on Derived */
+/** the derivator function of the derivator object, exists on Derived and on DerivedMapArray */
 const sym_derivator = Symbol("derivator");
 
 /** this symbols is present when it is a reactive derivation
@@ -91,19 +91,23 @@ const sym_tracked = Symbol("tracked");
  */
 const sym_all = Symbol("all");
 
+/** exists on DerivedMapArray, the array from which the map occours */
+const sym_src = Symbol("src");
+
+/** exists on DerivedMapArray */
+const sym_cache = Symbol("cache");
+
 //#endregion
 //#region globals
 
 /** @typedef {{ [sym_pideps]: Set<WeakRef<Derived>>, [sym_ders]: Set<WeakRef<Derived>>, [sym_weak]: WeakRef<Derived>, [sym_value]?: any }} Derived */
-/** @typedef {{ [sym_ders]: Set<WeakRef<Derived>>[], [sym_slots]: Set<WeakRef<Derived>>[], [sym_len]: Set<WeakRef<Derived>>, [sym_all]: Set<WeakRef<Derived>>, [sym_value]: TrackedArray, [sym_tracked]: TrackedArray } & any[]} TrackedArray */
+/** @typedef {any[] & { [sym_ders]: Set<WeakRef<Derived>>[], [sym_slots]: Set<WeakRef<Derived>>[], [sym_len]: Set<WeakRef<Derived>>, [sym_all]: Set<WeakRef<Derived>>, [sym_value]: TrackedArray, [sym_tracked]: TrackedArray }} TrackedArray */
 
 /** if this value is set, it is the derived currently running at the top of the stack
  *
  * if it is null, it means we are outside a derived
  *
- * if it is false, it means we are ignoring dependencies
- *
- * @type {Derived | null | false} */
+ * @type {Derived | null} */
 let current_derived = null;
 
 /** flag that is set everytime the derivation is used
@@ -124,22 +128,9 @@ const reactiveFunctionsRefs = new WeakMap();
 const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
     constructor: Derived,
     now() {
-        if (current_derived !== null) throw new Error(current_derived
-            ? "can't call method now inside of a derivation, call the derived or call the now method outside a derivation"
-            : "can't call method now inside of another call to Derived.now, call the derived or call the now method outside a derivation");
-        const old_derived_used = current_derived_used;
-        current_derived = false;
-        try {
-            return this();
-        } finally {
-            current_derived = null;
-            current_derived_used = old_derived_used;
-        }
-    },
-    untracked() {
         const old_derived = current_derived;
         const old_derived_used = current_derived_used;
-        current_derived = false;
+        current_derived = null;
         try {
             return this();
         } finally {
@@ -166,7 +157,7 @@ function Derived(name, derivator) {
     /** @type {Derived} */
     const Derived = ({
         [name]() {
-            if (current_derived === null) throw new Error("can't call a derived outside of a derivation, use the now method or call this inside a derivation");
+            //if (current_derived === null) throw new Error("can't call a derived outside of a derivation, use the now method or call this inside a derivation");
 
             if (current_derived) {
                 // add the current derivator as a derivation of myself
@@ -184,7 +175,7 @@ function Derived(name, derivator) {
                 const arr = Array.from(pideps);
                 const old_derived = current_derived;
                 const old_derived_used = current_derived_used;
-                current_derived = false; // this null ensures the true invalidation tests below don't add any derivations
+                current_derived = null; // this null ensures the true invalidation tests below don't add any derivations
                 try {
                     // this for finds all references in pideps that don't point to an invalidated derived, and stops as soon as it finds one
                     for (let i = 0; i < arr.length; i++) {
@@ -238,15 +229,16 @@ function Derived(name, derivator) {
 
 defineProperties(Derived, {
     now(derivator) {
-        if (current_derived !== null) throw new Error(current_derived
-            ? "can't call method now inside of a derivation, call the derived or call the now method outside a derivation"
-            : "can't call method now inside of another call to Derived.now, call the derived or call the now method outside a derivation");
+        // if (current_derived !== null) throw new Error(current_derived
+        //     ? "can't call method now inside of a derivation, call the derived or call the now method outside a derivation"
+        //     : "can't call method now inside of another call to Derived.now, call the derived or call the now method outside a derivation");
+        const old_derived = current_derived;
         const old_derived_used = current_derived_used;
-        current_derived = false;
+        current_derived = null;
         try {
             return derivator();
         } finally {
-            current_derived = null;
+            current_derived = old_derived;
             current_derived_used = old_derived_used;
         }
     },
@@ -272,10 +264,7 @@ Derived.prototype = DerivedPrototype;
 const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
     constructor: State,
     now() {
-        if (current_derived !== null) throw new Error("can't call method now inside of a derivation, call the state or call the now method outside a derivation");
-        return this[sym_value];
-    },
-    untracked() {
+        //if (current_derived !== null) throw new Error("can't call method now inside of a derivation, call the state or call the now method outside a derivation");
         return this[sym_value];
     },
     set(value) {
@@ -304,7 +293,7 @@ function State(name, value) {
     }
     const State = ({
         [name]() {
-            if (current_derived === null) throw new Error("can't call a state outside of a derivation, use the now method or call this inside a derivation");
+            //if (current_derived === null) throw new Error("can't call a state outside of a derivation, use the now method or call this inside a derivation");
             if (current_derived) {
                 // add the current derivator as a derivation of myself
                 State[sym_ders].add(current_derived[sym_weak]);
@@ -340,7 +329,7 @@ function affect(affector, reference) {
                 const old_derived_used = current_derived_used;
                 current_derived = affector;
                 try {
-                    current_derived_used = false;
+                    current_derived_used = null;
                     affector();
                     if (!current_derived_used) ignore(affector);
                 } finally {
@@ -437,7 +426,7 @@ function invalidateDerivation(target, transitive) {
 }
 /** @param {Set<WeakRef<Derived>> | undefined | null} set */
 function invalidateDerivationSet(set) {
-    if (!set) return;
+    if (!set || !set.size) return;
     const src = Array.from(set);
     set.clear();
     for (let i = 0; i < src.length; i++) {
@@ -455,7 +444,6 @@ function invalidateDerivationList(arr) {
         invalidateDerivationSet(set);
     }
 }
-
 
 //#endregion
 //#region utils
@@ -502,10 +490,6 @@ function track(value) {
         }
         return proxy;
     } else if (proto == Array.prototype && Array.isArray(value)) {
-        const proxy = new Proxy(value, TrackedArrayProxyHandler);
-        Object.setPrototypeOf(value, TrackedArrayPrototype);
-        //Object.defineProperty(value, sym_ders, { value: /*TODO! ?*/ });
-        Object.defineProperty(value, sym_tracked, { value: proxy });
         const descriptors = Object.getOwnPropertyDescriptors(value);
         for (let key = 0; key < value.length; key++) {
             const descriptor = descriptors[key];
@@ -528,7 +512,7 @@ function track(value) {
             // hence we would need a call to the track function in the property getter
             // however, that might be too much of a performance hit, for such a small edge case (frozen properties), so we are not doing that for now
         }
-        return proxy;
+        return createTrackedArray(value, TrackedArrayPrototype, TrackedArrayProxyHandler);
     }
     return value;
 }
@@ -600,7 +584,7 @@ const TrackedObjectProxyHandler = {
     //     return Reflect.preventExtensions(target);
     // },
     set(target, p, newValue, receiver) {
-        const result = Reflect.set(target, p, newValue, receiver);
+        const result = Reflect.set(target, p, newValue, target);
         if (typeof p == "string") trackedObjectInvalidate(target, p); // TODO! check if a value property really did change
         return result;
     },
@@ -690,21 +674,22 @@ keys
 */
 // #endregion
 
-function TrackedArray(arrayLength) {
-    if (typeof arrayLength != "number" && arrayLength !== undefined) {
-        throw new TypeError("arrayLength is not a number");
-    }
-    arrayLength = arrayLength || 0;
-    const value = Array(arrayLength);
-    const proxy = new Proxy(value, TrackedArrayProxyHandler);
-    Object.setPrototypeOf(value, (new.target && new.target.prototype && typeof new.target.prototype == "object") ? new.target.prototype : TrackedArrayPrototype);
-    Object.defineProperty(value, sym_ders, { value: Array(arrayLength) });
-    Object.defineProperty(value, sym_slots, { value: Array(arrayLength) });
+function createTrackedArray(value, prototype, proxyHandler) {
+    const proxy = new Proxy(value, proxyHandler);
+    Object.setPrototypeOf(value, prototype);
+    Object.defineProperty(value, sym_ders, { value: Array(value.length) });
+    Object.defineProperty(value, sym_slots, { value: Array(value.length) });
     Object.defineProperty(value, sym_len, { value: new Set() });
     Object.defineProperty(value, sym_all, { value: new Set() });
     Object.defineProperty(value, sym_value, { value });
     Object.defineProperty(value, sym_tracked, { value: proxy });
     return proxy;
+}
+
+function TrackedArray(arrayLength) {
+    if (typeof arrayLength != "number" && arrayLength !== undefined) throw new TypeError("arrayLength is not a number");
+    const prototype = (new.target && new.target.prototype && typeof new.target.prototype == "object") ? new.target.prototype : TrackedArrayPrototype;
+    return createTrackedArray(Array(arrayLength || 0), prototype, TrackedArrayProxyHandler);
 }
 
 const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
@@ -777,6 +762,14 @@ const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
     },
     fill(value, start, end) {
         throw new Error("TODO! TrackedArray.prototype.fill");
+    },
+
+    $map(derivator, thisArg) {
+        const value = Array();
+        Object.defineProperty(value, sym_src, { value: this[sym_value] });
+        Object.defineProperty(value, sym_derivator, { value: derivator.bind(thisArg) });
+        Object.defineProperty(value, sym_cache, { value: new WeakMap() });
+        return createTrackedArray(value, DerivedArrayPrototype, DerivedMapArrayProxyHandler);
     },
 });
 
@@ -872,13 +865,13 @@ const TrackedArrayProxyHandler = {
     //     return Reflect.isExtensible(target);
     // },
     ownKeys(target) {
-        target[sym_all].add(current_derived[sym_weak]);
+        if (current_derived) target[sym_all].add(current_derived[sym_weak]);
         return Reflect.ownKeys(target);
     },
     // preventExtensions(target) {
     //     return Reflect.preventExtensions(target);
     // },
-    set(target, p, newValue, receiver) {
+    set(target, p, newValue) {
         if (p === "length") {
             const new_length = as_length(newValue);
             if (new_length === undefined) throw new Error("invalid length value");
@@ -887,7 +880,7 @@ const TrackedArrayProxyHandler = {
                 target.length = new_length;
                 target[sym_ders].length = new_length;
                 target[sym_slots].length = new_length;
-                const result = Reflect.set(target, p, newValue, receiver);
+                const result = Reflect.set(target, p, newValue, target);
                 invalidateDerivationSet(target[sym_len]);
                 invalidateDerivationSet(target[sym_all]);
                 return result;
@@ -897,14 +890,14 @@ const TrackedArrayProxyHandler = {
                 target.length = new_length;
                 target[sym_ders].length = new_length;
                 target[sym_slots].length = new_length;
-                const result = Reflect.set(target, p, newValue, receiver);
+                const result = Reflect.set(target, p, newValue, target);
                 invalidateDerivationList(ders);
                 invalidateDerivationList(slots);
                 invalidateDerivationSet(target[sym_len]);
                 invalidateDerivationSet(target[sym_all]);
                 return result;
             } else {
-                return Reflect.set(target, p, newValue, receiver);
+                return Reflect.set(target, p, newValue, target);
             }
         }
         const index = as_index(p);
@@ -916,14 +909,14 @@ const TrackedArrayProxyHandler = {
                 target[sym_slots].length = index + 1;
                 length_updated = true;
             }
-            const result = Reflect.set(target, p, newValue, receiver);
+            const result = Reflect.set(target, p, newValue, target);
             invalidateDerivationSet(target[sym_ders][index]);
             invalidateDerivationSet(target[sym_slots][index]);
             if (length_updated) invalidateDerivationSet(target[sym_len]);
             invalidateDerivationSet(target[sym_all]);
             return result;
         }
-        return Reflect.set(target, p, newValue, receiver);
+        return Reflect.set(target, p, newValue, target);
     },
     // setPrototypeOf(target, v) {
     //     return Reflect.setPrototypeOf(target, v);
@@ -932,6 +925,7 @@ const TrackedArrayProxyHandler = {
 
 /** @param {TrackedArray} target @param {string | symbol} prop   */
 function trackedArrayUseProp(target, prop) {
+    if (!current_derived) return;
     if (prop === "length") {
         target[sym_len].add(current_derived[sym_weak]);
         return;
@@ -940,12 +934,149 @@ function trackedArrayUseProp(target, prop) {
     if (index === undefined) return;
     const length = target.length;
     if (index < length) {
-        target[sym_ders][index].add(current_derived[sym_weak]);
-        target[sym_slots][index].add(current_derived[sym_weak]);
+        let set;
+
+        const ders = target[sym_ders];
+        set = ders[index];
+        if (!set) ders[index] = set = new Set();
+        set.add(current_derived[sym_weak]);
+
+        const slots = target[sym_slots];
+        set = slots[index];
+        if (!set) slots[index] = set = new Set();
+        set.add(current_derived[sym_weak]);
     } else {
         target[sym_len].add(current_derived[sym_weak]);
     }
 }
+
+//#region derived array definitions
+
+function mutationOnDerivedArray() {
+    throw new TypeError("cannot mutate derived array");
+}
+
+function DerivedArray(arrayLength) {
+    // same exact code as TrackedArray, returns TrackedArray instances and not DerivedArray instances,
+    // but under a function with a different name for better debugging
+    if (typeof arrayLength != "number" && arrayLength !== undefined) throw new TypeError("arrayLength is not a number");
+    const prototype = (new.target && new.target.prototype && typeof new.target.prototype == "object") ? new.target.prototype : TrackedArrayPrototype;
+    return createTrackedArray(Array(arrayLength || 0), prototype, TrackedArrayProxyHandler);
+}
+
+const DerivedArrayPrototype = defineProperties({ __proto__: TrackedArrayPrototype }, {
+    constructor: DerivedArray,
+    push() { mutationOnDerivedArray(); },
+    pop() { mutationOnDerivedArray(); },
+    unshift() { mutationOnDerivedArray(); },
+    shift() { mutationOnDerivedArray(); },
+    splice() { mutationOnDerivedArray(); },
+    sort() { mutationOnDerivedArray(); },
+    reverse() { mutationOnDerivedArray(); },
+    copyWithin() { mutationOnDerivedArray(); },
+    fill() { mutationOnDerivedArray(); },
+});
+
+DerivedArray.prototype = DerivedArrayPrototype;
+
+/** @type {ProxyHandler<TrackedArray>} */
+const DerivedArrayProxyHandler = {
+    defineProperty() { mutationOnDerivedArray(); },
+    deleteProperty() { mutationOnDerivedArray(); },
+    set() { mutationOnDerivedArray(); },
+    setPrototypeOf() { mutationOnDerivedArray(); },
+    preventExtensions() { mutationOnDerivedArray(); },
+};
+
+//#endregion
+
+//#region DerivedMapArray
+
+/** @typedef {TrackedArray & {[sym_src]: TrackedArray, [sym_derivator](value: T, index: Derived, array: T[]): U, [sym_cache]: WeakMap<Set<WeakKey<Derived>>, Derived>}} DerivedMapArray */
+
+/** @type {ProxyHandler<DerivedMapArray>} */
+const DerivedMapArrayProxyHandler = {
+    ...DerivedArrayProxyHandler,
+    get(target, p, receiver) {
+        if (p === "length") {
+            return target[sym_src].length;
+        }
+        const index = as_index(p);
+        if (index !== undefined) return derivedMapArrayGet(target, index);
+        return Reflect.get(target, p, receiver);
+    },
+    getOwnPropertyDescriptor(target, p) {
+        if (p === "length") {
+            return {
+                value: target[sym_src].length,
+                writable: true,
+                enumerable: false,
+                configurable: false,
+            };
+        }
+        const index = as_index(p);
+        if (index !== undefined) return {
+            value: derivedMapArrayGet(target, index),
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        };
+        return Reflect.getOwnPropertyDescriptor(target, p);
+    },
+    //getPrototypeOf(target) {},
+    has(target, p) {
+        if (p === "length") {
+            return true;
+        }
+        const index = as_index(p);
+        if (index !== undefined) return index in target[sym_src];
+        return Reflect.has(target, p);
+    },
+    isExtensible(target) {
+        return true;
+    },
+    ownKeys(target) {
+        const src = target[sym_src];
+        const length = src.length;
+        const keys = [];
+        for (let i = 0; i < length; i++) {
+            if (i in src) keys[keys.length] = "" + i;
+        }
+        keys[keys.length] = "length";
+        keys.push(...Object.getOwnPropertySymbols(target));
+        return keys;
+    },
+};
+
+/** @param {DerivedMapArray} target @param {number} index */
+function derivedMapArrayGet(target, index) {
+    const src = target[sym_src];
+    const cache = target[sym_cache];
+    const slots = src[sym_slots];
+    if (index >= slots.length) {
+        // the `target.length` produces the side effect of using the length,
+        // and we just so happen to need to return undefined in this case
+        return void src.length;
+    }
+    let set = slots[index];
+    if (!set) slots[index] = set = new Set();
+    if (cache.has(set)) {
+        return cache.get(set)();
+    }
+    //const fixed_set = target[sym_ders][index];
+    //const derived_index = function DerivedIndex() {
+    //    if (current_derived) fixed_set.add(current_derived[sym_weak]);
+    //    return index;
+    //};
+    const cached = new Derived(() => {
+        if (current_derived) set.add(current_derived[sym_weak]);
+        return target[sym_derivator](target[sym_src][index], () => NaN, target[sym_src][sym_tracked]);
+    });
+    cache.set(set, cached);
+    return cached();
+}
+
+//#endregion
 
 //#region array helper functions
 function normalize_length(length, max) {
@@ -999,6 +1130,19 @@ function as_length(key) {
     return undefined;
 }
 //#endregion
+
+//#endregion
+
+//#region array extensions
+
+defineProperties(Array.prototype, {
+    $map(derivator, thisArg) {
+        return this.map(callbackfn, thisArg);
+        function callbackfn(value, number, array) {
+            return derivator(value, Derived.from(number), array);
+        }
+    },
+});
 
 //#endregion
 
