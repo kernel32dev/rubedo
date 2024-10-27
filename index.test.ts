@@ -5,33 +5,27 @@ describe("State and Derived with caching and invalidation", () => {
         const state = new State(10);
         expect(state()).toBe(10);
     });
-
     test("State should allow updating the value", () => {
         const state = new State(5);
-        expect(state.set(20)).toBe(20);
+        state.set(20);
         expect(state()).toBe(20);
     });
-
     test("State should allow transforming the value", () => {
         const state = new State(5);
-        expect(state.mut(x => x * 4)).toBe(20);
+        state.mut(x => x * 4);
         expect(state()).toBe(20);
     });
-
     test("Derived should cache computed value", () => {
-        let callCount = 0;
         const state = new State(10);
-        const derived = new Derived(() => {
-            callCount++;
-            return state() * 2;
-        });
+        const mock = jest.fn(() => state() * 2);
+        const derived = new Derived(mock);
 
-        // Should compute only once
+        expect(mock).toHaveBeenCalledTimes(0);
         expect(derived()).toBe(20);
+        expect(mock).toHaveBeenCalledTimes(1);
         expect(derived()).toBe(20);
-        expect(callCount).toBe(1);
+        expect(mock).toHaveBeenCalledTimes(1);
     });
-
     test("Derived should update when state changes", () => {
         const state = new State(10);
         const derived = new Derived(() => state() * 2);
@@ -42,29 +36,27 @@ describe("State and Derived with caching and invalidation", () => {
         state.set(15);
         expect(derived()).toBe(30);
     });
-
     test("Dependent derivators should not trigger if derived value is memoized", () => {
         const state1 = new State<number>(0);
         const mock2 = jest.fn(() => state1() >= 0);
         const derived2 = new Derived(mock2);
         const mock3 = jest.fn(() => derived2() ? "yes" : "no");
         const derived3 = new Derived(mock3);
-        expect(mock2.mock.calls.length).toBe(0);
-        expect(mock3.mock.calls.length).toBe(0);
+        expect(mock2).toHaveBeenCalledTimes(0);
+        expect(mock3).toHaveBeenCalledTimes(0);
         derived3();
-        expect(mock2.mock.calls.length).toBe(1);
-        expect(mock3.mock.calls.length).toBe(1);
+        expect(mock2).toHaveBeenCalledTimes(1);
+        expect(mock3).toHaveBeenCalledTimes(1);
         state1.set(-1); derived3();
-        expect(mock2.mock.calls.length).toBe(2);
-        expect(mock3.mock.calls.length).toBe(2);
+        expect(mock2).toHaveBeenCalledTimes(2);
+        expect(mock3).toHaveBeenCalledTimes(2);
         state1.set(1); derived3();
-        expect(mock2.mock.calls.length).toBe(3);
-        expect(mock3.mock.calls.length).toBe(3);
+        expect(mock2).toHaveBeenCalledTimes(3);
+        expect(mock3).toHaveBeenCalledTimes(3);
         state1.set(2); derived3();
-        expect(mock2.mock.calls.length).toBe(4);
-        expect(mock3.mock.calls.length).toBe(3); // derived3
+        expect(mock2).toHaveBeenCalledTimes(4);
+        expect(mock3).toHaveBeenCalledTimes(3); // derived3
     });
-
     test("Derived can stop depending on derives", () => {
         const state1 = new State("state1", true);
         const state2 = new State("state2", "yes");
@@ -112,6 +104,92 @@ describe("State and Derived with caching and invalidation", () => {
     test("Derived works with Derived", () => {
         const derived = new Derived(() => 1);
         expect(Derived.now(() => derived())).toBe(1);
+    });
+});
+
+describe("special State objects", () => {
+    describe("State.view", () => {
+        test("State.view should create a state view for an object's property", () => {
+            const target = {
+                username: "initial_user",
+                password: "initial_pass"
+            };
+
+            // Create a view state for the username property
+            const usernameState = State.view(target, "username");
+
+            // Check that it reads the correct initial value
+            expect(usernameState()).toBe("initial_user");
+
+            // Modify the view state and check if it updates the target object property
+            usernameState.set("updated_user");
+            expect(target.username).toBe("updated_user");
+
+            // Update the target object property directly and check if the view reflects the change
+            target.username = "direct_update";
+            expect(usernameState()).toBe("direct_update");
+        });
+        test("State.view should only affect the specified property", () => {
+            const target = {
+                username: "user",
+                email: "user@example.com"
+            };
+
+            // Create a view state for the username property
+            const usernameState = State.view(target, "username");
+
+            // Modify the view state
+            usernameState.set("new_user");
+
+            // Check that only the username property was modified
+            expect(target.username).toBe("new_user");
+            expect(target.email).toBe("user@example.com");
+        });
+    });
+
+    describe("State.proxy", () => {
+        test("State.proxy should use custom getter and setter functions", () => {
+            let actualValue = 100;
+
+            // Define getter and setter functions for the proxy state
+            const getter = jest.fn(() => actualValue);
+            const setter = jest.fn((value) => {
+                actualValue = value;
+            });
+
+            // Create the proxy state
+            const proxyState = State.proxy(getter, setter);
+
+            // Test the initial value via the proxy's getter
+            expect(proxyState()).toBe(100);
+            expect(getter).toHaveBeenCalledTimes(1);
+
+            // Test setting a new value via the proxy's setter
+            proxyState.set(200);
+            expect(setter).toHaveBeenCalledWith(200);
+            expect(actualValue).toBe(200);
+
+            // Check that getter reflects the updated value
+            expect(proxyState()).toBe(200);
+            expect(getter).toHaveBeenCalledTimes(2);
+        });
+        test("State.proxy should not interfere with unrelated state", () => {
+            let proxyValue = "proxy_initial";
+            const getter = () => proxyValue;
+            const setter = (value: string) => { proxyValue = value; };
+
+            // Create a separate state
+            const independentState = new State("independent");
+            const proxyState = State.proxy(getter, setter);
+
+            // Modify the proxy and independent states
+            proxyState.set("proxy_updated");
+            independentState.set("new_independent");
+
+            // Verify that each state reflects only its own changes
+            expect(proxyState()).toBe("proxy_updated");
+            expect(independentState()).toBe("new_independent");
+        });
     });
 });
 
@@ -316,29 +394,26 @@ describe("tracked array", () => {
         const arr = State.track([0, 1, 2]) as number[];
         const mock = jest.fn(String);
         const derived = arr.$map(mock);
-        expect(mock.mock.calls.length).toBe(0);
+        expect(mock).toHaveBeenCalledTimes(0);
         expect([...derived]).toEqual(["0", "1", "2"]);
-        expect(mock.mock.calls.length).toBe(3);
+        expect(mock).toHaveBeenCalledTimes(3);
         arr[0] = 3;
-        expect(mock.mock.calls.length).toBe(3);
+        expect(mock).toHaveBeenCalledTimes(3);
         expect([...derived]).toEqual(["3", "1", "2"]);
-        expect(mock.mock.calls.length).toBe(4);
+        expect(mock).toHaveBeenCalledTimes(4);
     });
     test("double derived map works", () => {
         const arr = State.track([0, 1, 2]) as number[];
         const mock = jest.fn(String);
         const derived = arr.$map(mock).$map(Number);
-        expect(mock.mock.calls.length).toBe(0);
+        expect(mock).toHaveBeenCalledTimes(0);
         expect([...derived]).toEqual([0, 1, 2]);
-        expect(mock.mock.calls.length).toBe(3);
+        expect(mock).toHaveBeenCalledTimes(3);
         arr[0] = 3;
-        expect(mock.mock.calls.length).toBe(3);
+        expect(mock).toHaveBeenCalledTimes(3);
         expect([...derived]).toEqual([3, 1, 2]);
-        expect(mock.mock.calls.length).toBe(4);
+        expect(mock).toHaveBeenCalledTimes(4);
     });
-});
-
-describe("tracked array additional tests", () => {
     test("derivation notice on clear array", () => {
         const arr = State.track([1, 2, 3]) as number[];
         const derived = new Derived(() => arr.length);

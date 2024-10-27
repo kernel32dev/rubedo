@@ -93,11 +93,8 @@ export namespace Derived {
  * so always use `const` no matter what, and if you need mutability, create an instance of `State` instead
  */
 export interface State<in out T> extends Derived<T> {
-    /** changes the value in state, and invalidates dependents if the new value is different from the current one
-     *
-     * returns the value passed in
-     */
-    set<U extends T>(value: U): U;
+    /** changes the value in state, and invalidates dependents if the new value is different from the current one */
+    set<U extends T>(value: U): void;
     /** computes the new value based on the function, and invalidates dependents if the new value is different from the current one
      *
      * this **can** be called anywhere, altough the old value is read, that read won't cause a dependency
@@ -107,10 +104,8 @@ export interface State<in out T> extends Derived<T> {
      * there is no need to call this function,
      * just get the object and mutate it directly,
      * don't clone the object unless necessary
-     *
-     * returns the computed value passed in
      */
-    mut<U extends T>(transform: (value: T) => U): U;
+    mut<U extends T>(transform: (value: T) => U): void;
 }
 export const State: {
     /** creates a new state, with the value passed as the initial value,
@@ -161,6 +156,38 @@ export const State: {
      * returns the value passed in, never throws errors
      */
     track<T>(value: T): T;
+
+    /** creates a state that gives a view into a property of an object
+     *
+     * sometimes you want to pass a property "by reference", giving someone a state that refers to that property
+     *
+     * ```
+     * declare function create_input(value: State<string>): HTMLInputElement;
+     *
+     * const my_state = State.track({
+     *     username: "",
+     *     password: "",
+     * });
+     * const username_input = create_input(my_state.username); // wrong, not passing it "by reference"
+     * ```
+     *
+     * view allows you to create a state that when read, it reads from your property, and when it is written to, it writes to your property
+     *
+     * allowing you to pass properties "by reference"
+     *
+     * ```
+     * const username_input = create_input(State.view(my_state, "username")); // correct, passing it "by reference"
+     * ```
+     */
+    view<T extends object, K extends keyof T>(target: T, key: K): State<T[K]>;
+    view<T extends object, K extends keyof T>(name: string, target: T, key: K): State<T[K]>;
+
+    /** create a proxy state, that gives you full control over how the value is read and written
+     *
+     * no caching is ever done, every access to it calls the getter, calls to the set method call the setter, calls to the mut method call the getter and then the setter
+     */
+    proxy<T>(getter: () => T, setter: (value: T) => void): State<T>;
+    proxy<T>(name: string, getter: () => T, setter: (value: T) => void): State<T>;
 
     /** an object that is tracked, changes to it can be noticed by derivations that use it
      *

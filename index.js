@@ -97,6 +97,18 @@ const sym_src = Symbol("src");
 /** exists on DerivedMapArray */
 const sym_cache = Symbol("cache");
 
+/** used by StateView */
+const sym_target = Symbol("target");
+
+/** used by StateView */
+const sym_key = Symbol("key");
+
+/** used by StateProxy */
+const sym_getter = Symbol("getter");
+
+/** used by StateProxy */
+const sym_setter = Symbol("setter");
+
 //#endregion
 //#region globals
 
@@ -160,7 +172,7 @@ function Derived(name, derivator) {
         name = "State";
     }
     if (typeof derivator !== "function") throw new TypeError("Derivator is not a function");
-    name = name === "State" ? derivator.name || name : name;
+    name = name === "State" ? derivator.name || name : "" + name;
     /** @type {Derived} */
     const Derived = ({
         [name]() {
@@ -281,7 +293,6 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
             this[sym_value] = value;
             invalidateDerivationSet(this[sym_ders]);
         }
-        return value;
     },
     mut(transformer) {
         if (typeof transformer != "function") throw new TypeError("transformer is not a function");
@@ -290,7 +301,44 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
             this[sym_value] = value;
             invalidateDerivationSet(this[sym_ders]);
         }
-        return value;
+    },
+});
+
+const StateViewPrototype = defineProperties({ __proto__: StatePrototype }, {
+    now() {
+        const self = this;
+        return Derived.now(function () {
+            return self[sym_target][self[sym_key]];
+        });
+    },
+    set(value) {
+        this[sym_target][this[sym_key]] = value;
+    },
+    mut(transformer) {
+        const self = this;
+        const value = transformer(Derived.now(function () {
+            return self[sym_target][self[sym_key]];
+        }));
+        this[sym_target][this[sym_key]] = value;
+    },
+});
+
+const StateProxyPrototype = defineProperties({ __proto__: StatePrototype }, {
+    now() {
+        const self = this;
+        return Derived.now(function () {
+            return self[sym_getter]();
+        });
+    },
+    set(value) {
+        this[sym_setter](value);
+    },
+    mut(transformer) {
+        const self = this;
+        const value = Derived.now(function () {
+            return self[sym_getter]();
+        });
+        this[sym_setter](transformer(value));
     },
 });
 
@@ -299,6 +347,8 @@ function State(name, value) {
     if (arguments.length == 1) {
         value = name;
         name = "State";
+    } else {
+        name = "" + name;
     }
     const State = ({
         [name]() {
@@ -319,6 +369,46 @@ function State(name, value) {
 
 defineProperties(State, {
     track,
+    view(name, target, key) {
+        if (arguments.length == 2) {
+            key = target;
+            target = name;
+            name = "StateView";
+        } else {
+            name = "" + name;
+        }
+        if (!target || (typeof target != "object" && typeof target != "function")) throw new TypeError("the target must be an object");
+        if (typeof key != "string" && typeof key != "number" && typeof key != "symbol") throw new TypeError("State.view can't use a value of type " + typeof key + " as a key");
+        const State = ({
+            [name]() {
+                return State[sym_target][State[sym_key]];
+            }
+        })[name];
+        Object.setPrototypeOf(State, StateViewPrototype);
+        Object.defineProperty(State, sym_target, { value: track(target) });
+        Object.defineProperty(State, sym_key, { value: key });
+        return State;
+    },
+    proxy(name, getter, setter) {
+        if (arguments.length == 2) {
+            setter = getter;
+            getter = name;
+            name = "StateProxy";
+        } else {
+            name = "" + name;
+        }
+        if (typeof getter != "function") throw new TypeError("getter is not a function");
+        if (typeof setter != "function") throw new TypeError("setter is not a function");
+        const State = ({
+            [name]() {
+                return State[sym_getter]();
+            }
+        })[name];
+        Object.setPrototypeOf(State, StateProxyPrototype);
+        Object.defineProperty(State, sym_getter, { value: getter });
+        Object.defineProperty(State, sym_setter, { value: setter });
+        return State;
+    },
     Object: StateObject,
     Array: StateArray,
 })
