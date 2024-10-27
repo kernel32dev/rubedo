@@ -6,16 +6,16 @@
  *
  * on `State` and `Derived` this is always a `Set<WeakRef<Derived>>`
  *
- * on `TrackedObject` this is always a `Record<string | sym_all, Set<WeakRef<Derived>>>` with null prototype
+ * on `StateObject` this is always a `Record<string | sym_all, Set<WeakRef<Derived>>>` with null prototype
  *
- * on `TrackedArray` this is always a `(Set<WeakRef<Derived>> | <empty>)[]` (each item represents the corresponding item in the real array by index, (shifting will invalidate later slots))
+ * on `StringArray` this is always a `(Set<WeakRef<Derived>> | <empty>)[]` (each item represents the corresponding item in the real array by index, (shifting will invalidate later slots))
  *
  * the value is `WeakRef<Derived>` and if it matches `.deref()[sym_weak]` that means the derivation is still active
  *
  * if it does not match, this weakref can be discarded, since it was from an outdated derivation */
 const sym_ders = Symbol("ders");
 
-/** the slot based derivations of this array, present on all `TrackedArray`
+/** the slot based derivations of this array, present on all `StringArray`
  *
  * unlike sym_ders, shifting will **not** invalidate later slots
  *
@@ -23,7 +23,7 @@ const sym_ders = Symbol("ders");
  */
 const sym_slots = Symbol("slots");
 
-/** the derivations of the array's length, present on all `TrackedArray` */
+/** the derivations of the array's length, present on all `StringArray` */
 const sym_len = Symbol("len");
 
 /** the invalidated and possibly invalidated dependencies of this object, present only on Derived objects
@@ -53,7 +53,7 @@ const sym_weak = Symbol("weak");
 
 /** the value of this object, always exists on State, and exists on Derived unless it is being actively derived or has never being derived
  *
- * also used by `TrackedArray` to store itself not wrapped in a proxy
+ * also used by `StringArray` to store itself not wrapped in a proxy
  */
 const sym_value = Symbol("value");
 
@@ -85,9 +85,9 @@ const sym_affect_refs = Symbol("affect_refs");
  */
 const sym_tracked = Symbol("tracked");
 
-/** a symbol used by `TrackedObject[sym_ders]` when something depends on all string properties
+/** a symbol used by `StateObject[sym_ders]` when something depends on all string properties
  *
- * also used by `TrackedArray` to store derivations `Set<WeakRef<Derived>>` that need all values
+ * also used by `StringArray` to store derivations `Set<WeakRef<Derived>>` that need all values
  */
 const sym_all = Symbol("all");
 
@@ -101,7 +101,7 @@ const sym_cache = Symbol("cache");
 //#region globals
 
 /** @typedef {{ [sym_pideps]: Set<WeakRef<Derived>>, [sym_ders]: Set<WeakRef<Derived>>, [sym_weak]: WeakRef<Derived>, [sym_value]?: any }} Derived */
-/** @typedef {any[] & { [sym_ders]: Set<WeakRef<Derived>>[], [sym_slots]: Set<WeakRef<Derived>>[], [sym_len]: Set<WeakRef<Derived>>, [sym_all]: Set<WeakRef<Derived>>, [sym_value]: TrackedArray, [sym_tracked]: TrackedArray }} TrackedArray */
+/** @typedef {any[] & { [sym_ders]: Set<WeakRef<Derived>>[], [sym_slots]: Set<WeakRef<Derived>>[], [sym_len]: Set<WeakRef<Derived>>, [sym_all]: Set<WeakRef<Derived>>, [sym_value]: StringArray, [sym_tracked]: StringArray }} StringArray */
 
 /** if this value is set, it is the derived currently running at the top of the stack
  *
@@ -261,6 +261,7 @@ defineProperties(Derived, {
     use(value) {
         return value instanceof Derived ? value() : track(value);
     },
+    affect,
 })
 
 Derived.prototype = DerivedPrototype;
@@ -315,6 +316,12 @@ function State(name, value) {
     State[sym_value] = track(value);
     return State;
 }
+
+defineProperties(State, {
+    track,
+    Object: StateObject,
+    Array: StateArray,
+})
 
 State.prototype = StatePrototype;
 
@@ -497,7 +504,7 @@ function track(value) {
     if (sym_tracked in value) return value[sym_tracked];
     const proto = Object.getPrototypeOf(value);
     if (!proto || proto == Object.prototype) {
-        const proxy = new Proxy(value, TrackedObjectProxyHandler);
+        const proxy = new Proxy(value, StateObjectProxyHandler);
         Object.defineProperty(value, sym_ders, { value: { __proto__: null } });
         Object.defineProperty(value, sym_tracked, { value: proxy });
         const descriptors = Object.getOwnPropertyDescriptors(value);
@@ -546,7 +553,7 @@ function track(value) {
             // hence we would need a call to the track function in the property getter
             // however, that might be too much of a performance hit, for such a small edge case (frozen properties), so we are not doing that for now
         }
-        return createTrackedArray(value, TrackedArrayPrototype);
+        return createStateArray(value, StateArrayPrototype);
     }
     return value;
 }
@@ -554,15 +561,15 @@ function track(value) {
 //#endregion
 //#region object
 
-function TrackedObject() {
+function StateObject() {
     const value = new.target ? this : {};
-    const proxy = new Proxy(value, TrackedObjectProxyHandler);
+    const proxy = new Proxy(value, StateObjectProxyHandler);
     Object.defineProperty(value, sym_ders, { value: { __proto__: null } });
     Object.defineProperty(value, sym_tracked, { value: proxy });
     return proxy;
 }
 
-defineProperties(TrackedObject, {
+defineProperties(StateObject, {
     [Symbol.hasInstance](target) {
         return target && typeof target == "object" && sym_tracked in target;
     },
@@ -578,10 +585,10 @@ defineProperties(TrackedObject, {
     }
 });
 
-TrackedObject.prototype = Object.prototype;
+StateObject.prototype = Object.prototype;
 
 /** @type {ProxyHandler} */
-const TrackedObjectProxyHandler = {
+const StateObjectProxyHandler = {
     //apply(target, thisArg, argArray) {
     //    return Reflect.apply(target, thisArg, argArray);
     //},
@@ -592,14 +599,14 @@ const TrackedObjectProxyHandler = {
         const result = Reflect.defineProperty(target, property, attributes);
         if (result && typeof property == "string") {
             if ("value" in attributes) attributes.value = track(attributes.value);
-            trackedObjectInvalidate(target, property); // TODO! check if the property really did change
+            stateObjectInvalidate(target, property); // TODO! check if the property really did change
         }
         return result;
     },
     deleteProperty(target, p) {
         if (typeof p == "string" && p in target) {
             const result = Reflect.deleteProperty(target, p);
-            if (result) trackedObjectInvalidate(target, p);
+            if (result) stateObjectInvalidate(target, p);
             return result;
         } else {
             return Reflect.deleteProperty(target, p);
@@ -607,7 +614,7 @@ const TrackedObjectProxyHandler = {
     },
     get(target, p, receiver) {
         if (typeof p == "string") {
-            trackedObjectUse(target, p);
+            stateObjectUse(target, p);
             // the line below fixes the problem outlined in the track function
             // it is commentend out because it is called very often and may not justify the potential performance hit for fixing a very small edge case (frozen properties)
             //return track(Reflect.get(target, p, receiver));
@@ -616,21 +623,21 @@ const TrackedObjectProxyHandler = {
     },
     getOwnPropertyDescriptor(target, p) {
         const descriptor = Reflect.getOwnPropertyDescriptor(target, p);
-        if (typeof p == "string" && (!descriptor || "value" in descriptor)) trackedObjectUse(target, p);
+        if (typeof p == "string" && (!descriptor || "value" in descriptor)) stateObjectUse(target, p);
         return descriptor;
     },
     // getPrototypeOf(target) {
     //     return Reflect.getPrototypeOf(target);
     // },
     has(target, p) {
-        if (typeof p == "string") trackedObjectUse(target, p);
+        if (typeof p == "string") stateObjectUse(target, p);
         return Reflect.has(target, p);
     },
     // isExtensible(target) {
     //     return Reflect.isExtensible(target);
     // },
     ownKeys(target) {
-        trackedObjectUse(target, sym_all);
+        stateObjectUse(target, sym_all);
         return Reflect.ownKeys(target);
     },
     // preventExtensions(target) {
@@ -639,7 +646,7 @@ const TrackedObjectProxyHandler = {
     set(target, p, newValue, receiver) {
         if (typeof p == "string") newValue = track(newValue);
         const result = Reflect.set(target, p, newValue, target);
-        if (typeof p == "string") trackedObjectInvalidate(target, p); // TODO! check if a value property really did change
+        if (typeof p == "string") stateObjectInvalidate(target, p); // TODO! check if a value property really did change
         return result;
     },
     // setPrototypeOf(target, v) {
@@ -648,7 +655,7 @@ const TrackedObjectProxyHandler = {
 };
 
 /** @param {string} key */
-function trackedObjectInvalidate(target, key) {
+function stateObjectInvalidate(target, key) {
     /** @type {Record<string | sym_all, Set<WeakRef<Derived>>>} */
     const ders = target[sym_ders];
     invalidateDerivationSet(ders[key]);
@@ -656,7 +663,7 @@ function trackedObjectInvalidate(target, key) {
 }
 
 /** @param {string | sym_all} key */
-function trackedObjectUse(target, key) {
+function stateObjectUse(target, key) {
     if (!current_derived) return;
     /** @type {Record<string | sym_all, Set<WeakRef<Derived>>>} */
     const ders = target[sym_ders];
@@ -728,8 +735,8 @@ keys
 */
 // #endregion
 
-function createTrackedArray(value, prototype) {
-    const proxy = new Proxy(value, TrackedArrayProxyHandler);
+function createStateArray(value, prototype) {
+    const proxy = new Proxy(value, StateArrayProxyHandler);
     const length = value.length || 0;
     Object.setPrototypeOf(value, prototype);
     Object.defineProperty(value, sym_ders, { value: Array(length) });
@@ -741,13 +748,13 @@ function createTrackedArray(value, prototype) {
     return proxy;
 }
 
-function TrackedArray(arrayLength) {
+function StateArray(arrayLength) {
     if (typeof arrayLength != "number" && arrayLength !== undefined) throw new TypeError("arrayLength is not a number");
-    const prototype = (constructor && constructor.prototype && typeof constructor.prototype == "object") ? constructor.prototype : TrackedArrayPrototype;
-    return createTrackedArray(arrayLength, prototype);
+    const prototype = (constructor && constructor.prototype && typeof constructor.prototype == "object") ? constructor.prototype : StateArrayPrototype;
+    return createStateArray(arrayLength, prototype);
 }
 
-defineProperties(TrackedArray, {
+defineProperties(StateArray, {
     [Symbol.hasInstance](target) {
         return Array.isArray(target) && sym_tracked in target;
     },
@@ -760,10 +767,10 @@ defineProperties(TrackedArray, {
     },
 });
 
-const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
-    constructor: TrackedArray,
+const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
+    constructor: StateArray,
     push() {
-        const target = /** @type {TrackedArray} */ (this[sym_value]);
+        const target = /** @type {StringArray} */ (this[sym_value]);
         if (arguments.length) {
             for (let i = 0; i < arguments.length - 1; i++) {
                 arguments[i] = track(arguments[i]);
@@ -778,7 +785,7 @@ const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
         return target.length;
     },
     pop() {
-        const target = /** @type {TrackedArray} */ (this[sym_value]);
+        const target = /** @type {StringArray} */ (this[sym_value]);
         if (!target.length) return;
         const result = Array.prototype.pop.call(target);
         const length = target.length;
@@ -789,7 +796,7 @@ const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
         return result;
     },
     unshift() {
-        const target = /** @type {TrackedArray} */ (this[sym_value]);
+        const target = /** @type {StringArray} */ (this[sym_value]);
         if (arguments.length) {
             for (let i = 0; i < arguments.length - 1; i++) {
                 arguments[i] = track(arguments[i]);
@@ -805,7 +812,7 @@ const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
         return target.length;
     },
     shift() {
-        const target = /** @type {TrackedArray} */ (this[sym_value]);
+        const target = /** @type {StringArray} */ (this[sym_value]);
         if (!target.length) return;
         const result = Array.prototype.shift.call(target);
         target[sym_ders].shift();
@@ -816,13 +823,13 @@ const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
         return result;
     },
     splice() {
-        throw new Error("TODO! TrackedArray.prototype.splice");
+        throw new Error("TODO! StringArray.prototype.splice");
     },
     sort(callback) {
-        throw new Error("TODO! TrackedArray.prototype.sort");
+        throw new Error("TODO! StringArray.prototype.sort");
     },
     reverse() {
-        const target = /** @type {TrackedArray} */ (this[sym_value]);
+        const target = /** @type {StringArray} */ (this[sym_value]);
         Array.prototype.reverse.call(target);
         target[sym_ders].reverse();
         target[sym_slots].reverse();
@@ -832,10 +839,10 @@ const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
         return this;
     },
     copyWithin(dest, src, src_end) {
-        throw new Error("TODO! TrackedArray.prototype.copyWithin");
+        throw new Error("TODO! StringArray.prototype.copyWithin");
     },
     fill(value, start, end) {
-        throw new Error("TODO! TrackedArray.prototype.fill");
+        throw new Error("TODO! StringArray.prototype.fill");
     },
 
     $map(derivator, thisArg) {
@@ -843,10 +850,10 @@ const TrackedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
     },
 });
 
-TrackedArray.prototype = TrackedArrayPrototype;
+StateArray.prototype = StateArrayPrototype;
 
-/** @type {ProxyHandler<TrackedArray>} */
-const TrackedArrayProxyHandler = {
+/** @type {ProxyHandler<StringArray>} */
+const StateArrayProxyHandler = {
     //apply(target, thisArg, argArray) {
     //    return Reflect.apply(target, thisArg, argArray);
     //},
@@ -918,18 +925,18 @@ const TrackedArrayProxyHandler = {
         return Reflect.deleteProperty(target, p);
     },
     get(target, p, receiver) {
-        trackedArrayUseProp(target, p);
+        stateArrayUseProp(target, p);
         return Reflect.get(target, p, receiver);
     },
     getOwnPropertyDescriptor(target, p) {
-        trackedArrayUseProp(target, p);
+        stateArrayUseProp(target, p);
         return Reflect.getOwnPropertyDescriptor(target, p);
     },
     // getPrototypeOf(target) {
     //     return Reflect.getPrototypeOf(target);
     // },
     has(target, p) {
-        trackedArrayUseProp(target, p);
+        stateArrayUseProp(target, p);
         return Reflect.has(target, p);
     },
     // isExtensible(target) {
@@ -995,8 +1002,8 @@ const TrackedArrayProxyHandler = {
     // },
 };
 
-/** @param {TrackedArray} target @param {string | symbol} prop   */
-function trackedArrayUseProp(target, prop) {
+/** @param {StringArray} target @param {string | symbol} prop   */
+function stateArrayUseProp(target, prop) {
     if (!current_derived) return;
     if (prop === "length") {
         target[sym_len].add(current_derived[sym_weak]);
@@ -1029,15 +1036,15 @@ function mutationOnDerivedArray() {
 }
 
 function DerivedArray(arrayLength) {
-    // return TrackedArray instances and not DerivedArray instances,
+    // return StringArray instances and not DerivedArray instances,
     // this serves as a constructor with a different name for the DerivedArrayPrototype for better debugging
-    // we return TrackedArray here to allow deep clones, jest needs it and possibly other libraries too
+    // we return StringArray here to allow deep clones, jest needs it and possibly other libraries too
     if (typeof arrayLength != "number" && arrayLength !== undefined) throw new TypeError("arrayLength is not a number");
-    const prototype = (constructor && constructor.prototype && typeof constructor.prototype == "object") ? constructor.prototype : TrackedArrayPrototype;
-    return createTrackedArray(arrayLength, prototype);
+    const prototype = (constructor && constructor.prototype && typeof constructor.prototype == "object") ? constructor.prototype : StateArrayPrototype;
+    return createStateArray(arrayLength, prototype);
 }
 
-const DerivedArrayPrototype = defineProperties({ __proto__: TrackedArrayPrototype }, {
+const DerivedArrayPrototype = defineProperties({ __proto__: StateArrayPrototype }, {
     constructor: DerivedArray,
     push() { mutationOnDerivedArray(); },
     pop() { mutationOnDerivedArray(); },
@@ -1052,7 +1059,7 @@ const DerivedArrayPrototype = defineProperties({ __proto__: TrackedArrayPrototyp
 
 DerivedArray.prototype = DerivedArrayPrototype;
 
-/** @type {ProxyHandler<TrackedArray>} */
+/** @type {ProxyHandler<StringArray>} */
 const DerivedArrayProxyHandler = {
     defineProperty() { mutationOnDerivedArray(); },
     deleteProperty() { mutationOnDerivedArray(); },
@@ -1082,7 +1089,7 @@ function DerivedMapArray(src, derivator, thisArg) {
     return proxy;
 }
 
-/** @typedef {TrackedArray & {[sym_src]: TrackedArray, [sym_derivator](value: T, index: Derived, array: T[]): U, [sym_cache]: WeakMap<Set<WeakKey<Derived>>, Derived>}} DerivedMapArray */
+/** @typedef {StringArray & {[sym_src]: StringArray, [sym_derivator](value: T, index: Derived, array: T[]): U, [sym_cache]: WeakMap<Set<WeakKey<Derived>>, Derived>}} DerivedMapArray */
 
 /** @type {ProxyHandler<DerivedMapArray>} */
 const DerivedMapArrayProxyHandler = {
@@ -1252,8 +1259,4 @@ module.exports = {
     __proto__: null,
     Derived,
     State,
-    affect,
-    track,
-    TrackedObject,
-    TrackedArray,
 };

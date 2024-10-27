@@ -1,4 +1,4 @@
-import { Derived, affect, State, track, TrackedObject } from ".";
+import { Derived, State } from ".";
 
 describe("State and Derived with caching and invalidation", () => {
     test("State should return the initial value", () => {
@@ -237,7 +237,7 @@ describe("affect", () => {
     test("affecting on State changes", async () => {
         const effects: number[] = [];
         const state = new State(0);
-        const affector = affect(effects, () => {
+        const affector = Derived.affect(effects, () => {
             effects.push(state());
         });
         expect(effects).toEqual([0]);
@@ -247,7 +247,7 @@ describe("affect", () => {
         state.set(2);
         await waitMicrotask;
         expect(effects).toEqual([0, 1, 2]);
-        affect.clear(affector);
+        Derived.affect.clear(affector);
         state.set(3);
         await waitMicrotask;
         expect(effects).toEqual([0, 1, 2]);
@@ -256,7 +256,7 @@ describe("affect", () => {
         const effects: string[] = [];
         const state = new State(0);
         const derived = new Derived(() => String(state()));
-        const affector = affect(effects, () => {
+        const affector = Derived.affect(effects, () => {
             effects.push(derived());
         });
         expect(effects).toEqual(["0"]);
@@ -266,7 +266,7 @@ describe("affect", () => {
         state.set(2);
         await waitMicrotask;
         expect(effects).toEqual(["0", "1", "2"]);
-        affect.clear(affector);
+        Derived.affect.clear(affector);
         state.set(3);
         await waitMicrotask;
         expect(effects).toEqual(["0", "1", "2"]);
@@ -275,14 +275,14 @@ describe("affect", () => {
 
 describe("tracked object", () => {
     test("derivation notice changes in TrackedObject", () => {
-        const obj = new TrackedObject() as { property?: number };
+        const obj = new State.Object() as { property?: number };
         const derived = new Derived(() => obj.property);
         expect(derived()).toBe(undefined);
         obj.property = 1;
         expect(derived()).toBe(1);
     });
     test("derivation notice changes in tracked object medwith track", () => {
-        const obj = track({}) as { property?: number };
+        const obj = State.track({}) as { property?: number };
         const derived = new Derived(() => obj.property);
         expect(derived()).toBe(undefined);
         obj.property = 1;
@@ -292,28 +292,28 @@ describe("tracked object", () => {
 
 describe("tracked array", () => {
     test("derivation notice changes to length", () => {
-        const arr = track([]) as number[];
+        const arr = State.track([]) as number[];
         const derived = new Derived(() => arr.length);
         expect(derived()).toBe(0);
         arr.push(0, 0, 0);
         expect(derived()).toBe(3);
     });
     test("derivation notice changes to item", () => {
-        const arr = track([0]) as number[];
+        const arr = State.track([0]) as number[];
         const derived = new Derived(() => arr[0]);
         expect(derived()).toBe(0);
         arr[0] = 3;
         expect(derived()).toBe(3);
     });
     test("naive map works", () => {
-        const arr = track([0]) as number[];
+        const arr = State.track([0]) as number[];
         const derived = new Derived(() => arr.map(String));
         expect(derived()).toEqual(["0"]);
         arr[0] = 3;
         expect(derived()).toEqual(["3"]);
     });
     test("derived map works", () => {
-        const arr = track([0, 1, 2]) as number[];
+        const arr = State.track([0, 1, 2]) as number[];
         const mock = jest.fn(String);
         const derived = arr.$map(mock);
         expect(mock.mock.calls.length).toBe(0);
@@ -325,7 +325,7 @@ describe("tracked array", () => {
         expect(mock.mock.calls.length).toBe(4);
     });
     test("double derived map works", () => {
-        const arr = track([0, 1, 2]) as number[];
+        const arr = State.track([0, 1, 2]) as number[];
         const mock = jest.fn(String);
         const derived = arr.$map(mock).$map(Number);
         expect(mock.mock.calls.length).toBe(0);
@@ -340,7 +340,7 @@ describe("tracked array", () => {
 
 describe("tracked array additional tests", () => {
     test("derivation notice on clear array", () => {
-        const arr = track([1, 2, 3]) as number[];
+        const arr = State.track([1, 2, 3]) as number[];
         const derived = new Derived(() => arr.length);
         expect(derived()).toBe(3);
 
@@ -348,7 +348,7 @@ describe("tracked array additional tests", () => {
         expect(derived()).toBe(0);
     });
     test("derivation notice on specific item change", () => {
-        const arr = track([1, 2, 3]) as number[];
+        const arr = State.track([1, 2, 3]) as number[];
         const derived = new Derived(() => arr[1]);  // Observe the second item
         expect(derived()).toBe(2);
 
@@ -356,7 +356,7 @@ describe("tracked array additional tests", () => {
         expect(derived()).toBe(42);
     });
     test("push and pop operations", () => {
-        const arr = track([1, 2, 3]) as number[];
+        const arr = State.track([1, 2, 3]) as number[];
         const derived = new Derived(() => arr.slice());
         expect(derived()).toEqual([1, 2, 3]);
 
@@ -367,7 +367,7 @@ describe("tracked array additional tests", () => {
         expect(derived()).toEqual([1, 2, 3]);
     });
     test("shift and unshift operations", () => {
-        const arr = track([1, 2, 3]) as number[];
+        const arr = State.track([1, 2, 3]) as number[];
         const derived = new Derived(() => arr.slice());
         expect(derived()).toEqual([1, 2, 3]);
 
@@ -378,7 +378,7 @@ describe("tracked array additional tests", () => {
         expect(derived()).toEqual([1, 2, 3]);
     });
     test("filter derivation works", () => {
-        const arr = track([1, 2, 3, 4, 5]) as number[];
+        const arr = State.track([1, 2, 3, 4, 5]) as number[];
         const derived = new Derived(() => arr.filter(x => x % 2 === 0));  // Track only even numbers
         expect(derived()).toEqual([2, 4]);
 
@@ -389,7 +389,7 @@ describe("tracked array additional tests", () => {
         expect(derived()).toEqual([4, 6]);
     });
     test("reduce derivation works", () => {
-        const arr = track([1, 2, 3]) as number[];
+        const arr = State.track([1, 2, 3]) as number[];
         const derived = new Derived(() => arr.reduce((acc, x) => acc + x, 0));  // Sum of elements
         expect(derived()).toBe(6);
 
@@ -400,7 +400,7 @@ describe("tracked array additional tests", () => {
         expect(derived()).toBe(10);
     });
     test("complex chain of map and filter", () => {
-        const arr = track([1, 2, 3, 4, 5, 6]) as number[];
+        const arr = State.track([1, 2, 3, 4, 5, 6]) as number[];
         const derived = new Derived(() => arr.filter(x => x % 2 === 0).map(x => x * 2));  // Double even numbers
         expect(derived()).toEqual([4, 8, 12]);
 
@@ -411,7 +411,7 @@ describe("tracked array additional tests", () => {
         expect(derived()).toEqual([20, 8, 12, 16]);
     });
     test("sorting derivation works", () => {
-        const arr = track([3, 1, 4, 1, 5]) as number[];
+        const arr = State.track([3, 1, 4, 1, 5]) as number[];
         const derived = new Derived(() => [...arr].sort((a, b) => a - b));  // Sort ascending
         expect(derived()).toEqual([1, 1, 3, 4, 5]);
 
@@ -419,7 +419,7 @@ describe("tracked array additional tests", () => {
         expect(derived()).toEqual([1, 1, 2, 4, 5]);
     });
     test("reversing derivation works", () => {
-        const arr = track([1, 2, 3]) as number[];
+        const arr = State.track([1, 2, 3]) as number[];
         const derived = new Derived(() => [...arr].reverse());  // Reverse the array
         expect(derived()).toEqual([3, 2, 1]);
 
