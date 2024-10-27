@@ -110,6 +110,14 @@ describe("Derivation memoized (possibly invalidated mechanism)", () => {
         derived3();
         expect(mock2).toHaveBeenCalledTimes(4);
         expect(mock3).toHaveBeenCalledTimes(3);
+        state1.set(3);
+        derived3();
+        expect(mock2).toHaveBeenCalledTimes(5);
+        expect(mock3).toHaveBeenCalledTimes(3);
+        state1.set(-4);
+        derived3();
+        expect(mock2).toHaveBeenCalledTimes(6);
+        expect(mock3).toHaveBeenCalledTimes(4);
     });
     test("Dependent derivators should not trigger if derived value is memoized (intermediate refreshed actively)", () => {
         const state = new State("0");

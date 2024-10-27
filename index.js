@@ -215,9 +215,7 @@ function Derived(name, derivator) {
                         const old_value = pideps.get(weak);
                         // TODO! somehow ensure this can't cause an infinite recursive loop
                         const new_value = derived();
-                        if (Object.is(old_value, new_value)) {
-                            pideps.delete(weak);
-                        } else {
+                        if (!Object.is(old_value, new_value)) {
                             invalidated = true;
                             break;
                         }
@@ -226,7 +224,7 @@ function Derived(name, derivator) {
                     current_derived = old_derived;
                     current_derived_used = old_derived_used;
                 }
-                if (!invalidated && pideps.size == 0) return Derived[sym_value];
+                if (!invalidated) return Derived[sym_value];
                 pideps.clear();
             }
             const old_derived = current_derived;
