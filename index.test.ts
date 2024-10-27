@@ -36,7 +36,7 @@ describe("State and Derived with caching and invalidation", () => {
         state.set(15);
         expect(derived()).toBe(30);
     });
-    test("Dependent derivators should not trigger if derived value is memoized", () => {
+    test("Dependent derivators should not trigger if derived value is memoized (intermediate refreshed lazily by derivation)", () => {
         const state1 = new State<number>(0);
         const mock2 = jest.fn(() => state1() >= 0);
         const derived2 = new Derived(mock2);
@@ -104,6 +104,39 @@ describe("State and Derived with caching and invalidation", () => {
     test("Derived works with Derived", () => {
         const derived = new Derived(() => 1);
         expect(Derived.now(() => derived())).toBe(1);
+    });
+    test("Dependent derivators should not trigger if derived value is memoized (intermediate refreshed actively)", () => {
+        const state = new State("0");
+        const mock1 = jest.fn(() => Number(state()));
+        const derived1 = new Derived(mock1);
+        const mock2 = jest.fn(() => derived1() == 0);
+        const derived2 = new Derived(mock2);
+
+        expect(mock1).toHaveBeenCalledTimes(0);
+        expect(mock2).toHaveBeenCalledTimes(0);
+
+        expect(derived1()).toBe(0);
+        expect(derived2()).toBe(true);
+
+        expect(mock1).toHaveBeenCalledTimes(1);
+        expect(mock2).toHaveBeenCalledTimes(1);
+
+        state.set("1");
+
+        expect(derived1()).toBe(1);
+        expect(derived2()).toBe(false);
+
+        expect(mock1).toHaveBeenCalledTimes(2);
+        expect(mock2).toHaveBeenCalledTimes(2);
+
+        state.set("2");
+
+        expect(derived1()).toBe(2);
+        expect(derived2()).toBe(false);
+
+        expect(mock1).toHaveBeenCalledTimes(3);
+        expect(mock2).toHaveBeenCalledTimes(3);
+
     });
 });
 

@@ -30,13 +30,20 @@ const sym_len = Symbol("len");
  *
  * having a non empty set on this value means this Derived is possibly invalidated, it is possibly invalidated if any of the deriveds in this set are invalidated
  *
- * this is always a `Set<WeakRef<Derived>>`
+ * this is always a `Map<WeakRef<Derived>, any>`
  *
- * the value is `WeakRef<Derived>` unlike sym_ders, it does not matter if it matches `.deref()[sym_weak]`, the point here is just to have a weak reference to the dependend object
+ * the key is `WeakRef<Derived>` unlike sym_ders, it does not matter if it matches `.deref()[sym_weak]`, the point here is just to have a weak reference to the dependend object
  *
- * it should safe to use a weak ref here, because it is garbage collected, then it was not a dependency anyway
+ * the value refers to the value the derivation was last known as, because it may be reevaluated without our knowledge, so we must track it here, we can't track it on the remote derived
  *
- * if it does not match then this derived is definitively invalidated */
+ * it should safe to use a weak ref here, because if it is garbage collected, then it was not a dependency anyway
+ *
+ * when obtaining the value for this derivation, this map should always be checked, and any derivations found on it should be evaluated, taking care to not accidentally create dependencies
+ *
+ * if any of the derivation produce a different value from what was last seen, then the current derivation is invalidated
+ *
+ * if every derivation produce the expected value, then the current derivation is validated and up to date
+ */
 const sym_pideps = Symbol("pideps");
 
 /** the current weak ref to this derived object, present only on Derived objects
@@ -51,7 +58,7 @@ const sym_pideps = Symbol("pideps");
  */
 const sym_weak = Symbol("weak");
 
-/** the value of this object, always exists on State, and exists on Derived unless it is being actively derived or has never being derived
+/** the value of this object, always exists on State, and exists on Derived unless it is being actively derived, has never being derived or is an affect
  *
  * also used by `StringArray` to store itself not wrapped in a proxy
  */
@@ -72,7 +79,7 @@ const sym_affect_task = Symbol("affect_task");
 
 /** this symbol is present on active affector functions
  *
- * this contains a function that must be called whenever a dependency of the derivation changes
+ * this contains a function that must be called whenever a dependency of the derivation possibly changes
  */
 const sym_affect = Symbol("affect");
 
@@ -112,7 +119,7 @@ const sym_setter = Symbol("setter");
 //#endregion
 //#region globals
 
-/** @typedef {{ [sym_pideps]: Set<WeakRef<Derived>>, [sym_ders]: Set<WeakRef<Derived>>, [sym_weak]: WeakRef<Derived>, [sym_value]?: any }} Derived */
+/** @typedef {{ [sym_pideps]: Map<WeakRef<Derived>, any>, [sym_ders]: Set<WeakRef<Derived>>, [sym_weak]: WeakRef<Derived>, [sym_value]?: any }} Derived */
 /** @typedef {any[] & { [sym_ders]: Set<WeakRef<Derived>>[], [sym_slots]: Set<WeakRef<Derived>>[], [sym_len]: Set<WeakRef<Derived>>, [sym_all]: Set<WeakRef<Derived>>, [sym_value]: StringArray, [sym_tracked]: StringArray }} StringArray */
 
 /** if this value is set, it is the derived currently running at the top of the stack
@@ -191,9 +198,10 @@ function Derived(name, derivator) {
                 }
                 const pideps = Derived[sym_pideps];
                 if (pideps.size == 0) return Derived[sym_value];
-                const arr = Array.from(pideps);
+                const arr = Array.from(pideps.keys());
                 const old_derived = current_derived;
                 const old_derived_used = current_derived_used;
+                let invalidated = false;
                 current_derived = null; // this null ensures the true invalidation tests below don't add any derivations
                 try {
                     // this for finds all references in pideps that don't point to an invalidated derived, and stops as soon as it finds one
@@ -204,11 +212,13 @@ function Derived(name, derivator) {
                             pideps.delete(weak);
                             continue;
                         }
-                        const old_value = derived[sym_value];
+                        const old_value = pideps.get(weak);
                         // TODO! somehow ensure this can't cause an infinite recursive loop
-                        if (Object.is(old_value, derived())) {
+                        const new_value = derived();
+                        if (Object.is(old_value, new_value)) {
                             pideps.delete(weak);
                         } else {
+                            invalidated = true;
                             break;
                         }
                     }
@@ -216,7 +226,8 @@ function Derived(name, derivator) {
                     current_derived = old_derived;
                     current_derived_used = old_derived_used;
                 }
-                if (pideps.size == 0) return Derived[sym_value];
+                if (!invalidated && pideps.size == 0) return Derived[sym_value];
+                pideps.clear();
             }
             const old_derived = current_derived;
             const old_derived_used = current_derived_used;
@@ -240,7 +251,7 @@ function Derived(name, derivator) {
     })[name];
     Object.setPrototypeOf(Derived, typeof new.target.prototype == "object" ? new.target.prototype : DerivedPrototype);
     Object.defineProperty(Derived, sym_ders, { value: new Set() });
-    Object.defineProperty(Derived, sym_pideps, { value: new Set() });
+    Object.defineProperty(Derived, sym_pideps, { value: new Map() });
     Object.defineProperty(Derived, sym_weak, { writable: true, value: null });
     return Derived;
 }
@@ -266,7 +277,7 @@ defineProperties(Derived, {
         const derived = function Derived() { return value; };
         Object.setPrototypeOf(derived, DerivedPrototype);
         Object.defineProperty(derived, sym_ders, { value: new Set() });
-        Object.defineProperty(derived, sym_pideps, { value: new Set() });
+        Object.defineProperty(derived, sym_pideps, { value: new Map() });
         Object.defineProperty(derived, sym_weak, { value: new WeakRef(derived) });
         return derived;
     },
@@ -450,7 +461,7 @@ function affect() {
         }
     };
 
-    Object.defineProperty(affector, sym_pideps, { configurable: true, value: new Set() });
+    Object.defineProperty(affector, sym_pideps, { configurable: true, value: new Map() }); //TODO! figure out how to correctly use this / if it is being correctly used
     Object.defineProperty(affector, sym_weak, { configurable: true, value: new WeakRef(affector) });
     Object.defineProperty(affector, sym_affect, { configurable: true, value: affect_async });
     Object.defineProperty(affector, sym_affect_refs, { configurable: true, value: new Set() });
@@ -548,7 +559,7 @@ function invalidateDerivation(target, transitive) {
             // altough recursiveDerivationInvalidationGuard is good to have, maybe we could rely on this instead, seems more correct
             // this would require imply some weak ref that is permanent and does not track invalidation with a null value
             if (!derived[sym_pideps].has(weak)) {
-                derived[sym_pideps].add(weak);
+                derived[sym_pideps].set(weak, target[sym_value]);
                 invalidateDerivation(derived, true);
             }
         }
@@ -1262,7 +1273,7 @@ function derivedMapArrayGet(target, index) {
     // const derived = function Derived() { return value; };
     // Object.setPrototypeOf(derived, DerivedPrototype);
     // Object.defineProperty(derived, sym_ders, { value: new Set() });
-    // Object.defineProperty(derived, sym_pideps, { value: new Set() });
+    // Object.defineProperty(derived, sym_pideps, { value: new Map() });
     // Object.defineProperty(derived, sym_weak, { value: new WeakRef(derived) });
     // return derived;
 
