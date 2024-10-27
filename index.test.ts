@@ -36,27 +36,6 @@ describe("State and Derived with caching and invalidation", () => {
         state.set(15);
         expect(derived()).toBe(30);
     });
-    test("Dependent derivators should not trigger if derived value is memoized (intermediate refreshed lazily by derivation)", () => {
-        const state1 = new State<number>(0);
-        const mock2 = jest.fn(() => state1() >= 0);
-        const derived2 = new Derived(mock2);
-        const mock3 = jest.fn(() => derived2() ? "yes" : "no");
-        const derived3 = new Derived(mock3);
-        expect(mock2).toHaveBeenCalledTimes(0);
-        expect(mock3).toHaveBeenCalledTimes(0);
-        derived3();
-        expect(mock2).toHaveBeenCalledTimes(1);
-        expect(mock3).toHaveBeenCalledTimes(1);
-        state1.set(-1); derived3();
-        expect(mock2).toHaveBeenCalledTimes(2);
-        expect(mock3).toHaveBeenCalledTimes(2);
-        state1.set(1); derived3();
-        expect(mock2).toHaveBeenCalledTimes(3);
-        expect(mock3).toHaveBeenCalledTimes(3);
-        state1.set(2); derived3();
-        expect(mock2).toHaveBeenCalledTimes(4);
-        expect(mock3).toHaveBeenCalledTimes(3); // derived3
-    });
     test("Derived can stop depending on derives", () => {
         const state1 = new State("state1", true);
         const state2 = new State("state2", "yes");
@@ -105,6 +84,33 @@ describe("State and Derived with caching and invalidation", () => {
         const derived = new Derived(() => 1);
         expect(Derived.now(() => derived())).toBe(1);
     });
+});
+
+describe("Derivation memoized (possibly invalidated mechanism)", () => {
+    test("Dependent derivators should not trigger if derived value is memoized (intermediate refreshed lazily by derivation)", () => {
+        const state1 = new State<number>(0);
+        const mock2 = jest.fn(() => state1() >= 0);
+        const derived2 = new Derived(mock2);
+        const mock3 = jest.fn(() => derived2() ? "yes" : "no");
+        const derived3 = new Derived(mock3);
+        expect(mock2).toHaveBeenCalledTimes(0);
+        expect(mock3).toHaveBeenCalledTimes(0);
+        derived3();
+        expect(mock2).toHaveBeenCalledTimes(1);
+        expect(mock3).toHaveBeenCalledTimes(1);
+        state1.set(-1);
+        derived3();
+        expect(mock2).toHaveBeenCalledTimes(2);
+        expect(mock3).toHaveBeenCalledTimes(2);
+        state1.set(1);
+        derived3();
+        expect(mock2).toHaveBeenCalledTimes(3);
+        expect(mock3).toHaveBeenCalledTimes(3);
+        state1.set(2);
+        derived3();
+        expect(mock2).toHaveBeenCalledTimes(4);
+        expect(mock3).toHaveBeenCalledTimes(3);
+    });
     test("Dependent derivators should not trigger if derived value is memoized (intermediate refreshed actively)", () => {
         const state = new State("0");
         const mock1 = jest.fn(() => Number(state()));
@@ -136,7 +142,6 @@ describe("State and Derived with caching and invalidation", () => {
 
         expect(mock1).toHaveBeenCalledTimes(3);
         expect(mock2).toHaveBeenCalledTimes(3);
-
     });
 });
 
