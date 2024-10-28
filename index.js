@@ -126,6 +126,18 @@ const sym_getter = Symbol("getter");
 /** used by StateProxy */
 const sym_setter = Symbol("setter");
 
+/** used by Promise */
+const sym_resolved = Symbol("resolved");
+
+/** used by Promise */
+const sym_rejected = Symbol("rejected");
+
+/** used by Promise */
+const sym_ders_resolved = Symbol("ders_resolved");
+
+/** used by Promise */
+const sym_ders_rejected = Symbol("ders_rejected");
+
 //#endregion
 //#region globals
 
@@ -174,9 +186,9 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
             current_derived_used = old_derived_used;
         }
     },
-    then(derivator) {
+    derive(derivator) {
         const derived = this;
-        return new Derived(function then() {
+        return new Derived(function derive() {
             return derivator(derived());
         });
     }
@@ -697,6 +709,26 @@ function track(value) {
             // however, that might be too much of a performance hit, for such a small edge case (frozen properties), so we are not doing that for now
         }
         return createStateArray(value, StateArrayPrototype);
+    } else if (value instanceof Promise) {
+        const promise = Object.defineProperty(value, sym_tracked, { value });
+        promise.then(
+            function trackPromiseResolution(value) {
+                if (sym_resolved in promise || sym_rejected in promise) return;
+                Object.defineProperty(promise, sym_resolved, { value });
+                const ders = promise[sym_ders_resolved];
+                delete promise[sym_ders_resolved];
+                delete promise[sym_ders_rejected];
+                invalidateDerivationSet(ders);
+            },
+            function trackPromiseRejection(value) {
+                if (sym_resolved in promise || sym_rejected in promise) return;
+                Object.defineProperty(promise, sym_rejected, { value });
+                const ders = promise[sym_ders_rejected];
+                delete promise[sym_ders_resolved];
+                delete promise[sym_ders_rejected];
+                invalidateDerivationSet(ders);
+            },
+        );
     }
     return value;
 }
@@ -1404,6 +1436,60 @@ defineProperties(Array.prototype, {
         }
     },
 });
+
+//#endregion
+
+//#region promise extensions
+
+defineProperties(Promise.prototype, {
+    $resolved() {
+        if (sym_resolved in this) return true;
+        if (!(sym_rejected in this)) promiseUseSetBySymbol(this, sym_ders_resolved);
+        return false;
+    },
+    $rejected() {
+        if (sym_rejected in this) return true;
+        if (!(sym_resolved in this)) promiseUseSetBySymbol(this, sym_ders_rejected);
+        return false;
+    },
+});
+
+Object.defineProperty(Promise.prototype, "$value", {
+    get: function $value() {
+        if (sym_resolved in this) return this[sym_resolved];
+        if (!(sym_rejected in this)) promiseUseSetBySymbol(this, sym_ders_resolved);
+    },
+    enumerable: false,
+    configurable: false,
+});
+
+Object.defineProperty(Promise.prototype, "$error", {
+    get: function $error() {
+        if (sym_rejected in this) return this[sym_rejected];
+        if (!(sym_resolved in this)) promiseUseSetBySymbol(this, sym_ders_rejected);
+    },
+    enumerable: false,
+    configurable: false,
+});
+
+function promiseUseSetBySymbol(promise, sym) {
+    if (current_derived) {
+        let set = promise[sym];
+        if (!set) {
+            set = new Set();
+            Object.defineProperty(track(promise), sym, {
+                value: set,
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            });
+        }
+        set.add(current_derived[sym_weak]);
+        current_derived_used = true;
+    } else {
+        track(promise);
+    }
+}
 
 //#endregion
 

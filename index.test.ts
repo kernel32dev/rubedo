@@ -1,5 +1,15 @@
 import { Derived, State } from ".";
 
+/** await this promise to wait for all microtasks to complete */
+const microtask = Promise.resolve();
+
+function promiseWithResolvers<T>(): [Promise<T>, (value: T | PromiseLike<T>) => void, (error?: any) => void] {
+    let f: (value: T | PromiseLike<T>) => void, r: (error?: any) => void;
+    const p = new Promise<T>((resolve, reject) => { f = resolve; r = reject; });
+    if (!f! || !r!) throw new Error("Promise did not run handler syncronously");
+    return [p, f, r];
+}
+
 describe("State and Derived with caching and invalidation", () => {
     test("State should return the initial value", () => {
         const state = new State(10);
@@ -168,40 +178,40 @@ describe("Derivation memoized (possibly invalidated mechanism)", () => {
         expect(mock2).toHaveBeenCalledTimes(1);
         expect(mock3).toHaveBeenCalledTimes(1);
         expect(affects).toEqual(["yes"]);
-        await waitMicrotask;
+        await microtask;
         expect(mock2).toHaveBeenCalledTimes(1);
         expect(mock3).toHaveBeenCalledTimes(1);
         expect(affects).toEqual(["yes"]);
         state1.set(-1);
-        await waitMicrotask;
+        await microtask;
         //expect(derived2()).toBe(false);
         //expect(derived3()).toBe("no");
         expect(mock2).toHaveBeenCalledTimes(2);
         expect(mock3).toHaveBeenCalledTimes(2);
         expect(affects).toEqual(["yes", "no"]);
         state1.set(1);
-        await waitMicrotask;
+        await microtask;
         //expect(derived2()).toBe(true);
         //expect(derived3()).toBe("yes");
         expect(mock2).toHaveBeenCalledTimes(3);
         expect(mock3).toHaveBeenCalledTimes(3);
         expect(affects).toEqual(["yes", "no", "yes"]);
         state1.set(2);
-        await waitMicrotask;
+        await microtask;
         //expect(derived2()).toBe(true);
         //expect(derived3()).toBe("yes");
         expect(mock2).toHaveBeenCalledTimes(4);
         expect(mock3).toHaveBeenCalledTimes(3);
         expect(affects).toEqual(["yes", "no", "yes"]);
         state1.set(3);
-        await waitMicrotask;
+        await microtask;
         //expect(derived2()).toBe(true);
         //expect(derived3()).toBe("yes");
         expect(mock2).toHaveBeenCalledTimes(5);
         expect(mock3).toHaveBeenCalledTimes(3);
         expect(affects).toEqual(["yes", "no", "yes"]);
         state1.set(-4);
-        await waitMicrotask;
+        await microtask;
         expect(mock2).toHaveBeenCalledTimes(6);
         expect(mock3).toHaveBeenCalledTimes(4);
         expect(affects).toEqual(["yes", "no", "yes", "no"]);
@@ -231,7 +241,7 @@ describe("Derivation memoized (possibly invalidated mechanism)", () => {
 
         expect(derived1()).toBe(1);
         expect(derived2()).toBe(false);
-        await waitMicrotask;
+        await microtask;
 
         expect(mock1).toHaveBeenCalledTimes(2);
         expect(mock2).toHaveBeenCalledTimes(2);
@@ -241,7 +251,7 @@ describe("Derivation memoized (possibly invalidated mechanism)", () => {
 
         expect(derived1()).toBe(2);
         expect(derived2()).toBe(false);
-        await waitMicrotask;
+        await microtask;
 
         expect(mock1).toHaveBeenCalledTimes(3);
         expect(mock2).toHaveBeenCalledTimes(3);
@@ -462,14 +472,14 @@ describe("affect", () => {
         });
         expect(effects).toEqual([0]);
         state.set(1);
-        await waitMicrotask;
+        await microtask;
         expect(effects).toEqual([0, 1]);
         state.set(2);
-        await waitMicrotask;
+        await microtask;
         expect(effects).toEqual([0, 1, 2]);
         Derived.affect.clear(affector);
         state.set(3);
-        await waitMicrotask;
+        await microtask;
         expect(effects).toEqual([0, 1, 2]);
     });
     test("affecting on Derived changes", async () => {
@@ -481,14 +491,14 @@ describe("affect", () => {
         });
         expect(effects).toEqual(["0"]);
         state.set(1);
-        await waitMicrotask;
+        await microtask;
         expect(effects).toEqual(["0", "1"]);
         state.set(2);
-        await waitMicrotask;
+        await microtask;
         expect(effects).toEqual(["0", "1", "2"]);
         Derived.affect.clear(affector);
         state.set(3);
-        await waitMicrotask;
+        await microtask;
         expect(effects).toEqual(["0", "1", "2"]);
     });
 });
@@ -645,5 +655,41 @@ describe("tracked array", () => {
     });
 });
 
-/** await this promise to wait for all microtasks to complete */
-const waitMicrotask = Promise.resolve();
+describe("tracked promise", () => {
+    test("$resolved notifies derived", async () => {
+        const [p, f, r] = promiseWithResolvers<number>();
+        const resolved = new Derived(() => p.$resolved());
+        expect(resolved()).toBe(false);
+        f(100);
+        expect(resolved()).toBe(false);
+        await microtask;
+        expect(resolved()).toBe(true);
+    });
+    test("$rejected notifies derived", async () => {
+        const [p, f, r] = promiseWithResolvers<number>();
+        const rejected = new Derived(() => p.$rejected());
+        expect(rejected()).toBe(false);
+        r("reason");
+        expect(rejected()).toBe(false);
+        await microtask;
+        expect(rejected()).toBe(true);
+    });
+    test("$value notifies derived", async () => {
+        const [p, f, r] = promiseWithResolvers<number>();
+        const resolved = new Derived(() => p.$value);
+        expect(resolved()).toBe(undefined);
+        f(100);
+        expect(resolved()).toBe(undefined);
+        await microtask;
+        expect(resolved()).toBe(100);
+    });
+    test("$error notifies derived", async () => {
+        const [p, f, r] = promiseWithResolvers<number>();
+        const rejected = new Derived(() => p.$error);
+        expect(rejected()).toBe(undefined);
+        r("reason");
+        expect(rejected()).toBe(undefined);
+        await microtask;
+        expect(rejected()).toBe("reason");
+    });
+});

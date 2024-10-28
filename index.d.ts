@@ -14,7 +14,7 @@ export interface Derived<out T> {
     now(): T;
 
     /** creates a new derivation using the derivator specified to transform the value */
-    then<U>(derivator: (value: T) => U): Derived<U>;
+    derive<U>(derivator: (value: T) => U): Derived<U>;
 }
 export const Derived: {
     /** creates a new derived, does not call the derivator immediatly, only calls it when needed,
@@ -134,11 +134,11 @@ export const State: {
      * 1. **plain objects** (with default object prototype, only string properties)
      * 2. **null prototype objects** (with default null prototype, only string properties)
      * 3. **TrackedObject and inheritors** (automatically tracked on constructor, only string properties)
-     * 4. **plain arrays** (default array prototype and Array.isArray, only items and length) *WIP!*
-     * 5. **TrackedArray and inheritors** (automatically tracked on constructor, only items and length) *WIP!*
+     * 4. **plain arrays** (default array prototype and Array.isArray, only items and length)
+     * 5. **TrackedArray and inheritors** (automatically tracked on constructor, only items and length)
      * 6. **Map** (with default prototype, only keys, values and size) *TODO!*
      * 7. **Set** (with default prototype, only items and size) *TODO!*
-     * 8. **Promise** (with default prototype, only the value or rejection of the promise) *TODO!*
+     * 8. **Promise** (with default prototype, only the value or rejection of the promise)
      *
      * also note that some tracking requires wrapping the object in a proxy,
      * and thus the original value may not tracked,
@@ -223,7 +223,7 @@ declare global {
     interface Array<T> {
         /** creates a new mapped array, whose values are automatically kept up to date, by calling the function whenever dependencies change and are needed
          *
-         * the `$` indicates this is a derived function that works with derived objects, and may not be exactly equivalent to their non deriving counterparts
+         * the `$` indicates this is a special derived function that works with derived objects, and may not be exactly equivalent to their non deriving counterparts
          *
          * attempting to mutate the resulting array directly will throw errors
          *
@@ -231,5 +231,59 @@ declare global {
          */
         $map<U>(derivator: (value: T, index: Derived<number>, array: T[]) => U): U[];
         $map<U, This>(derivator: (this: This, value: T, index: Derived<number>, array: T[]) => U, thisArg: This): U[];
+    }
+    interface Promise<T> {
+        /** returns true if this promise is already resolved (has `$value`)
+         *
+         * calling this inside a derivation will cause the derivation to notice when the promise is resolved
+         *
+         * note that the value returned is updated by the tracker of leviathan state and might not be true even if the promise is resolved
+         *
+         * if the value is true that means the promise is resolved, but if the value is false, that doesn't mean the promise isn't resolved
+         *
+         * however, because it notifies on change it is completely safe and correct to call this from derivations
+         *
+         * method added by leviathan-state
+         */
+        $resolved(): this is { $value: T };
+        /** returns true if this promise is already rejected (has `$error`)
+         *
+         * calling this inside a derivation will cause the derivation to notice when the promise is rejected
+         *
+         * note that the value returned is updated by the tracker of leviathan state and might not be true even if the promise is rejected
+         *
+         * if the value is true that means the promise is rejected, but if the value is false, that doesn't mean the promise isn't rejected
+         *
+         * however, because it notifies on change it is completely safe and correct to call this from derivations
+         *
+         * method added by leviathan-state
+         */
+        $rejected(): this is { $value: undefined };
+        /** returns the current value, or undefined it this promise is not settled or was rejected
+         *
+         * using this inside a derivation will cause the derivation to notice when the promise is resolved
+         *
+         * note that this value is updated by the tracker of leviathan state and might not contain the value even if the promise is resolved
+         *
+         * if the value is here that means the promise is resolved, but if the value isn't here, that doesn't mean the promise isn't resolved
+         *
+         * however, because it notifies on change it is completely safe and correct to use this from derivations
+         *
+         * property added by leviathan-state
+         */
+        readonly $value: T | undefined;
+        /** returns the current error, or undefined it this promise is not settled or was resolved
+         *
+         * using this inside a derivation will cause the derivation to notice when the promise is rejected
+         *
+         * note that this value is updated by the tracker of leviathan state and might not contain the value even if the promise is rejected
+         *
+         * if the value is here that means the promise is rejected, but if the value isn't here, that doesn't mean the promise isn't rejected
+         *
+         * however, because it notifies on change it is completely safe and correct to use this from derivations
+         *
+         * property added by leviathan-state
+         */
+        readonly $error: unknown;
     }
 }
