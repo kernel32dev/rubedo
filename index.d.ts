@@ -75,7 +75,10 @@ export const Derived: {
     affect: {
         <T extends () => void>(affected: object | symbol | "everything" | "nothing", affector: T): T;
         <T extends () => void>(...affected: [object | symbol, ...(object | symbol)[], T]): T;
-        /** the opposite of affect, causes the affector configured with affect to no longer be called when dependencies change */
+        /** the opposite of affect, causes the affector configured with affect to no longer be called when dependencies change
+         *
+         * if a call to the affector is pending, it will run syncronously now
+         */
         clear(affector: () => void): void;
     };
 };

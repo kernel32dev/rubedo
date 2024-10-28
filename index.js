@@ -79,9 +79,11 @@ const sym_derivator = Symbol("derivator");
  *
  * when those derivations are invalidated, a microtask is scheduled to automatically rerun the derivator
  *
- * the value is a boolean, and it is true when the microtask is scheduled, and false when not
+ * the value is a `boolean | null`, and it is a boolean when the microtask is scheduled, and null when not
  *
- * if it is true, setting it to false or unsetting it can also be used to cancel the pending task
+ * if it is true that mean the invalidation is transitive
+ *
+ * if it is false that mean the invalidation is not transitive
  */
 const sym_affect_task = Symbol("affect_task");
 
@@ -464,9 +466,10 @@ function affect() {
         affector[sym_affect]();
         return affector;
     }
-    function affect(transitive) {
-        if (!affector[sym_affect] || !affector[sym_affect_task]) return;
-        affector[sym_affect_task] = false;
+    function affect() {
+        const transitive = affector[sym_affect_task];
+        if (typeof transitive != "boolean") return;
+        affector[sym_affect_task] = null;
         const pideps = affector[sym_pideps];
         if (transitive && !possibleInvalidationIsInvalidated(pideps, affector[sym_weak])) {
             return;
@@ -484,11 +487,13 @@ function affect() {
             current_derived_used = old_derived_used;
         }
     }
+    const weak = new WeakRef(affector);
     Object.defineProperty(affector, sym_pideps, { configurable: true, value: new Map() }); //TODO! figure out how to correctly use this / if it is being correctly used
-    Object.defineProperty(affector, sym_weak, { configurable: true, value: new WeakRef(affector) });
+    Object.defineProperty(affector, sym_weak, { configurable: true, value: weak });
+    Object.defineProperty(affector, sym_piweak, { configurable: true, value: weak });
     Object.defineProperty(affector, sym_affect, { configurable: true, value: affect });
     Object.defineProperty(affector, sym_affect_refs, { configurable: true, value: new Set() });
-    Object.defineProperty(affector, sym_affect_task, { configurable: true, writable: true, value: false });
+    Object.defineProperty(affector, sym_affect_task, { configurable: true, writable: true, value: null });
 
     if (!nothing) addAffectRefs(affector, everything ? null : arguments);
 
@@ -532,19 +537,26 @@ function addAffectRefs(affector, references) {
 
 function clearAffect(affector) {
     if (typeof affector != "function") throw new TypeError("affector is not a function");
-    const refs = sym_affect_refs[sym_affect_refs];
-    delete affector[sym_affect_task];
-    delete affector[sym_ders];
-    delete affector[sym_pideps];
-    delete affector[sym_weak];
-    delete affector[sym_affect];
-    delete affector[sym_affect_refs];
-    if (refs) {
-        for (const i of refs) {
-            /** @type {Set | undefined} */
-            const set = affectFunctionsWeakRefs.get(i);
-            if (set && set.delete(affector) && set.size == 0) {
-                affectFunctionsWeakRefs.delete(i);
+    const affect_task = affector[sym_affect_task];
+    if (affect_task === undefined) return;
+    try {
+        affector[sym_affect]();
+    } finally {
+        const refs = affector[sym_affect_refs];
+        delete affector[sym_affect_task];
+        delete affector[sym_ders];
+        delete affector[sym_pideps];
+        delete affector[sym_weak];
+        delete affector[sym_piweak];
+        delete affector[sym_affect];
+        delete affector[sym_affect_refs];
+        if (refs) {
+            for (const i of refs) {
+                /** @type {Set | undefined} */
+                const set = affectFunctionsWeakRefs.get(i);
+                if (set && set.delete(affector) && set.size == 0) {
+                    affectFunctionsWeakRefs.delete(i);
+                }
             }
         }
     }
@@ -557,11 +569,13 @@ defineProperties(affect, { clear: clearAffect });
 
 /** @param {Derived} target @param {boolean} [transitive] */
 function invalidateDerivation(target, transitive) {
-    const affect_task = target[sym_affect];
-    if (affect_task) {
-        if (target[sym_affect_task] === false) {
-            target[sym_affect_task] = true;
-            queueMicrotask(() => affect_task(transitive));
+    const affect_task = target[sym_affect_task];
+    if (affect_task !== undefined) {
+        if (affect_task === null) {
+            target[sym_affect_task] = !!transitive;
+            queueMicrotask(target[sym_affect]);
+        } else if (affect_task === true && !transitive) {
+            target[sym_affect_task] = false;
         }
         return;
     }
@@ -581,7 +595,10 @@ function invalidateDerivation(target, transitive) {
         const derived = copy[i].deref();
         /* istanbul ignore next */
         if (derived && derived[sym_weak] === copy[i]) {
-            if (!weak) weak = new WeakRef(target);
+            if (!weak) {
+                weak = target[sym_piweak];
+                if (!weak) weak = target[sym_piweak] = new WeakRef(target);
+            }
             if (!derived[sym_pideps].has(weak)) {
                 derived[sym_pideps].set(weak, target[sym_value]);
             }
