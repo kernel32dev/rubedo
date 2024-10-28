@@ -8,14 +8,14 @@
  *
  * on `StateObject` this is always a `Record<string | sym_all, Set<WeakRef<Derived>>>` with null prototype
  *
- * on `StringArray` this is always a `(Set<WeakRef<Derived>> | <empty>)[]` (each item represents the corresponding item in the real array by index, (shifting will invalidate later slots))
+ * on `StateArray` this is always a `(Set<WeakRef<Derived>> | <empty>)[]` (each item represents the corresponding item in the real array by index, (shifting will invalidate later slots))
  *
  * the value is `WeakRef<Derived>` and if it matches `.deref()[sym_weak]` that means the derivation is still active
  *
  * if it does not match, this weakref can be discarded, since it was from an outdated derivation */
 const sym_ders = Symbol("ders");
 
-/** the slot based derivations of this array, present on all `StringArray`
+/** the slot based derivations of this array, present on all `StateArray`
  *
  * unlike sym_ders, shifting will **not** invalidate later slots
  *
@@ -23,7 +23,7 @@ const sym_ders = Symbol("ders");
  */
 const sym_slots = Symbol("slots");
 
-/** the derivations of the array's length, present on all `StringArray` */
+/** the derivations of the array's length, present on all `StateArray` */
 const sym_len = Symbol("len");
 
 /** the invalidated and possibly invalidated dependencies of this object, present only on Derived objects
@@ -68,7 +68,7 @@ const sym_piweak = Symbol("weak");
 
 /** the value of this object, always exists on State, and exists on Derived unless it is being actively derived, has never being derived or is an affect
  *
- * also used by `StringArray` to store itself not wrapped in a proxy
+ * also used by `StateArray` to store itself not wrapped in a proxy
  */
 const sym_value = Symbol("value");
 
@@ -104,7 +104,7 @@ const sym_tracked = Symbol("tracked");
 
 /** a symbol used by `StateObject[sym_ders]` when something depends on all string properties
  *
- * also used by `StringArray` to store derivations `Set<WeakRef<Derived>>` that need all values
+ * also used by `StateArray` to store derivations `Set<WeakRef<Derived>>` that need all values
  */
 const sym_all = Symbol("all");
 
@@ -142,7 +142,7 @@ const sym_ders_rejected = Symbol("ders_rejected");
 //#region globals
 
 /** @typedef {{ [sym_pideps]: Map<WeakRef<Derived>, any>, [sym_ders]: Set<WeakRef<Derived>>, [sym_weak]: WeakRef<Derived>, [sym_value]?: any }} Derived */
-/** @typedef {any[] & { [sym_ders]: Set<WeakRef<Derived>>[], [sym_slots]: Set<WeakRef<Derived>>[], [sym_len]: Set<WeakRef<Derived>>, [sym_all]: Set<WeakRef<Derived>>, [sym_value]: StringArray, [sym_tracked]: StringArray }} StringArray */
+/** @typedef {any[] & { [sym_ders]: Set<WeakRef<Derived>>[], [sym_slots]: Set<WeakRef<Derived>>[], [sym_len]: Set<WeakRef<Derived>>, [sym_all]: Set<WeakRef<Derived>>, [sym_value]: StateArray, [sym_tracked]: StateArray }} StateArray */
 
 /** if this value is set, it is the derived currently running at the top of the stack
  *
@@ -946,7 +946,7 @@ defineProperties(StateArray, {
 const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
     constructor: StateArray,
     push() {
-        const target = /** @type {StringArray} */ (this[sym_value]);
+        const target = /** @type {StateArray} */ (this[sym_value]);
         if (arguments.length) {
             for (let i = 0; i < arguments.length - 1; i++) {
                 arguments[i] = track(arguments[i]);
@@ -961,7 +961,7 @@ const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
         return target.length;
     },
     pop() {
-        const target = /** @type {StringArray} */ (this[sym_value]);
+        const target = /** @type {StateArray} */ (this[sym_value]);
         if (!target.length) return;
         const result = Array.prototype.pop.call(target);
         const length = target.length;
@@ -972,7 +972,7 @@ const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
         return result;
     },
     unshift() {
-        const target = /** @type {StringArray} */ (this[sym_value]);
+        const target = /** @type {StateArray} */ (this[sym_value]);
         if (arguments.length) {
             for (let i = 0; i < arguments.length - 1; i++) {
                 arguments[i] = track(arguments[i]);
@@ -988,7 +988,7 @@ const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
         return target.length;
     },
     shift() {
-        const target = /** @type {StringArray} */ (this[sym_value]);
+        const target = /** @type {StateArray} */ (this[sym_value]);
         if (!target.length) return;
         const result = Array.prototype.shift.call(target);
         target[sym_ders].shift();
@@ -999,13 +999,13 @@ const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
         return result;
     },
     splice() {
-        throw new Error("TODO! StringArray.prototype.splice");
+        throw new Error("TODO! StateArray.prototype.splice");
     },
     sort(callback) {
-        throw new Error("TODO! StringArray.prototype.sort");
+        throw new Error("TODO! StateArray.prototype.sort");
     },
     reverse() {
-        const target = /** @type {StringArray} */ (this[sym_value]);
+        const target = /** @type {StateArray} */ (this[sym_value]);
         Array.prototype.reverse.call(target);
         target[sym_ders].reverse();
         target[sym_slots].reverse();
@@ -1015,10 +1015,10 @@ const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
         return this;
     },
     copyWithin(dest, src, src_end) {
-        throw new Error("TODO! StringArray.prototype.copyWithin");
+        throw new Error("TODO! StateArray.prototype.copyWithin");
     },
     fill(value, start, end) {
-        throw new Error("TODO! StringArray.prototype.fill");
+        throw new Error("TODO! StateArray.prototype.fill");
     },
 
     $map(derivator, thisArg) {
@@ -1028,7 +1028,7 @@ const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
 
 StateArray.prototype = StateArrayPrototype;
 
-/** @type {ProxyHandler<StringArray>} */
+/** @type {ProxyHandler<StateArray>} */
 const StateArrayProxyHandler = {
     //apply(target, thisArg, argArray) {
     //    return Reflect.apply(target, thisArg, argArray);
@@ -1181,7 +1181,7 @@ const StateArrayProxyHandler = {
     // },
 };
 
-/** @param {StringArray} target @param {string | symbol} prop   */
+/** @param {StateArray} target @param {string | symbol} prop   */
 function stateArrayUseProp(target, prop) {
     if (!current_derived) return;
     if (prop === "length") {
@@ -1217,9 +1217,9 @@ function mutationOnDerivedArray() {
 }
 
 function DerivedArray(arrayLength) {
-    // return StringArray instances and not DerivedArray instances,
+    // return StateArray instances and not DerivedArray instances,
     // this serves as a constructor with a different name for the DerivedArrayPrototype for better debugging
-    // we return StringArray here to allow deep clones, jest needs it and possibly other libraries too
+    // we return StateArray here to allow deep clones, jest needs it and possibly other libraries too
     if (typeof arrayLength != "number" && arrayLength !== undefined) throw new TypeError("arrayLength is not a number");
     const prototype = (constructor && constructor.prototype && typeof constructor.prototype == "object") ? constructor.prototype : StateArrayPrototype;
     return createStateArray(arrayLength, prototype);
@@ -1240,7 +1240,7 @@ const DerivedArrayPrototype = defineProperties({ __proto__: StateArrayPrototype 
 
 DerivedArray.prototype = DerivedArrayPrototype;
 
-/** @type {ProxyHandler<StringArray>} */
+/** @type {ProxyHandler<StateArray>} */
 const DerivedArrayProxyHandler = {
     defineProperty() { mutationOnDerivedArray(); },
     deleteProperty() { mutationOnDerivedArray(); },
@@ -1270,7 +1270,7 @@ function DerivedMapArray(src, derivator, thisArg) {
     return proxy;
 }
 
-/** @typedef {StringArray & {[sym_src]: StringArray, [sym_derivator](value: T, index: Derived, array: T[]): U, [sym_cache]: WeakMap<Set<WeakKey<Derived>>, Derived>}} DerivedMapArray */
+/** @typedef {StateArray & {[sym_src]: StateArray, [sym_derivator](value: T, index: Derived, array: T[]): U, [sym_cache]: WeakMap<Set<WeakKey<Derived>>, Derived>}} DerivedMapArray */
 
 /** @type {ProxyHandler<DerivedMapArray>} */
 const DerivedMapArrayProxyHandler = {
