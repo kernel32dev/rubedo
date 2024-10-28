@@ -81,6 +81,8 @@ export const Derived: {
          */
         clear(affector: () => void): void;
     };
+    /** set this property to a function to log when any `WeakRef` created by leviathan is garbage collected */
+    debugLogWeakRefCleanUp: ((message: string) => void) | null,
 };
 export namespace Derived {
     /** a type alias to define that you expect a derivation that returns a `T`, but that a `T` is also accepted */

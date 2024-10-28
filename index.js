@@ -1,5 +1,6 @@
 //@ts-nocheck
 "use strict";
+
 //#region symbols
 
 /** the derivations of this object (Derived objects that depend on this), present on all objects that can be depended on such as State and Derived
@@ -64,7 +65,7 @@ const sym_weak = Symbol("weak");
  *
  * if this value is null it just means this property has not been initialized
  */
-const sym_piweak = Symbol("weak");
+const sym_piweak = Symbol("piweak");
 
 /** the value of this object, always exists on State, and exists on Derived unless it is being actively derived, has never being derived or is an affect
  *
@@ -169,6 +170,13 @@ const affectFunctionsWeakRefs = new WeakMap();
  *
  * @type {Set} */
 const affectFunctionsRefs = new Set();
+
+const NativeWeakRef = (globalThis).WeakRef;
+let WeakRef = NativeWeakRef;
+/** @type {FinalizationRegistry | null} */
+let debugRegistry = null;
+/** @type {((message: string) => void) | null} */
+let debugWeakRefLogger = null;
 
 //#endregion
 //#region Derived
@@ -324,6 +332,39 @@ defineProperties(Derived, {
     },
     affect,
 })
+
+Object.defineProperty(Derived, "debugLogWeakRefCleanUp", {
+    get() {
+        return debugWeakRefLogger;
+    },
+    set(logger) {
+        if (logger === null) {
+            debugWeakRefLogger = null;
+            WeakRef = NativeWeakRef;
+            if (debugRegistry) debugRegistry = null;
+            return;
+        }
+        if (typeof logger != "function") throw new TypeError("logger must be a function");
+        debugWeakRefLogger = logger;
+        if (!debugRegistry) {
+            const regex = new RegExp("^Error: ");
+            debugRegistry = new FinalizationRegistry(stack => {
+                const now = new Date();
+                const h = ("0" + now.getHours()).slice(-2);
+                const m = ("0" + now.getMinutes()).slice(-2);
+                const s = ("0" + now.getSeconds()).slice(-2);
+                const ms = ("00" + now.getMilliseconds()).slice(-3);
+                debugWeakRefLogger(`${h}:${m}:${s}.${ms} ${("" + stack).replace(regex, "")}`);
+            });
+            WeakRef = function DebugWeakRef(target) {
+                const ref = new NativeWeakRef(target);
+                debugRegistry.register(target, Error("cleanup (type: " + typeof target + ") (name: " + target.name + ")").stack);
+                //debugRegistry.register(ref, Error("cleanup (ref)").stack);
+                return ref;
+            }
+        }
+    },
+});
 
 Derived.prototype = DerivedPrototype;
 
@@ -1425,7 +1466,6 @@ function as_length(key) {
 //#endregion
 
 //#endregion
-
 //#region array extensions
 
 defineProperties(Array.prototype, {
@@ -1438,7 +1478,6 @@ defineProperties(Array.prototype, {
 });
 
 //#endregion
-
 //#region promise extensions
 
 defineProperties(Promise.prototype, {
