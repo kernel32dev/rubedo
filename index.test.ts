@@ -151,6 +151,102 @@ describe("Derivation memoized (possibly invalidated mechanism)", () => {
         expect(mock1).toHaveBeenCalledTimes(3);
         expect(mock2).toHaveBeenCalledTimes(3);
     });
+    test("Dependent derivators should not trigger if derived value is memoized (intermediate refreshed lazily by derivation) (with affector)", async () => {
+        const state1 = new State<number>(0);
+        const mock2 = jest.fn(() => state1() >= 0);
+        const derived2 = new Derived(mock2);
+        const mock3 = jest.fn(() => derived2() ? "yes" : "no");
+        const derived3 = new Derived(mock3);
+
+        expect(mock2).toHaveBeenCalledTimes(0);
+        expect(mock3).toHaveBeenCalledTimes(0);
+
+        const affects: ("yes" | "no")[] = [];
+        function affector() { affects.push(derived3()); }
+        Derived.affect(affects, affector);
+
+        expect(mock2).toHaveBeenCalledTimes(1);
+        expect(mock3).toHaveBeenCalledTimes(1);
+        expect(affects).toEqual(["yes"]);
+        await waitMicrotask;
+        expect(mock2).toHaveBeenCalledTimes(1);
+        expect(mock3).toHaveBeenCalledTimes(1);
+        expect(affects).toEqual(["yes"]);
+        state1.set(-1);
+        await waitMicrotask;
+        //expect(derived2()).toBe(false);
+        //expect(derived3()).toBe("no");
+        expect(mock2).toHaveBeenCalledTimes(2);
+        expect(mock3).toHaveBeenCalledTimes(2);
+        expect(affects).toEqual(["yes", "no"]);
+        state1.set(1);
+        await waitMicrotask;
+        //expect(derived2()).toBe(true);
+        //expect(derived3()).toBe("yes");
+        expect(mock2).toHaveBeenCalledTimes(3);
+        expect(mock3).toHaveBeenCalledTimes(3);
+        expect(affects).toEqual(["yes", "no", "yes"]);
+        state1.set(2);
+        await waitMicrotask;
+        //expect(derived2()).toBe(true);
+        //expect(derived3()).toBe("yes");
+        expect(mock2).toHaveBeenCalledTimes(4);
+        expect(mock3).toHaveBeenCalledTimes(3);
+        expect(affects).toEqual(["yes", "no", "yes"]);
+        state1.set(3);
+        await waitMicrotask;
+        //expect(derived2()).toBe(true);
+        //expect(derived3()).toBe("yes");
+        expect(mock2).toHaveBeenCalledTimes(5);
+        expect(mock3).toHaveBeenCalledTimes(3);
+        expect(affects).toEqual(["yes", "no", "yes"]);
+        state1.set(-4);
+        await waitMicrotask;
+        expect(mock2).toHaveBeenCalledTimes(6);
+        expect(mock3).toHaveBeenCalledTimes(4);
+        expect(affects).toEqual(["yes", "no", "yes", "no"]);
+    });
+    test("Dependent derivators should not trigger if derived value is memoized (intermediate refreshed actively) (with affector)", async () => {
+        const state = new State("0");
+        const mock1 = jest.fn(() => Number(state()));
+        const derived1 = new Derived(mock1);
+        const mock2 = jest.fn(() => derived1() == 0);
+        const derived2 = new Derived(mock2);
+
+        expect(mock1).toHaveBeenCalledTimes(0);
+        expect(mock2).toHaveBeenCalledTimes(0);
+
+        expect(derived1()).toBe(0);
+        expect(derived2()).toBe(true);
+
+        const affects: boolean[] = [];
+        function affector() { affects.push(derived2()); }
+        Derived.affect(affects, affector);
+
+        expect(mock1).toHaveBeenCalledTimes(1);
+        expect(mock2).toHaveBeenCalledTimes(1);
+        expect(affects).toEqual([true]);
+
+        state.set("1");
+
+        expect(derived1()).toBe(1);
+        expect(derived2()).toBe(false);
+        await waitMicrotask;
+
+        expect(mock1).toHaveBeenCalledTimes(2);
+        expect(mock2).toHaveBeenCalledTimes(2);
+        expect(affects).toEqual([true, false]);
+
+        state.set("2");
+
+        expect(derived1()).toBe(2);
+        expect(derived2()).toBe(false);
+        await waitMicrotask;
+
+        expect(mock1).toHaveBeenCalledTimes(3);
+        expect(mock2).toHaveBeenCalledTimes(3);
+        expect(affects).toEqual([true, false]);
+    });
 });
 
 describe("special State objects", () => {

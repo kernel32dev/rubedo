@@ -58,6 +58,14 @@ const sym_pideps = Symbol("pideps");
  */
 const sym_weak = Symbol("weak");
 
+/** the permanent weak ref to this derived object, present only on Derived objects
+ *
+ * this is always a `WeakRef<Derived> | null`
+ *
+ * if this value is null it just means this property has not been initialized
+ */
+const sym_piweak = Symbol("weak");
+
 /** the value of this object, always exists on State, and exists on Derived unless it is being actively derived, has never being derived or is an affect
  *
  * also used by `StringArray` to store itself not wrapped in a proxy
@@ -172,6 +180,45 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
     }
 });
 
+/** @param {Map<WeakRef<Derived>, any>} pideps @param {WeakRef<Derived>} [recreate_weak_link]   */
+function possibleInvalidationIsInvalidated(pideps, recreate_weak_link) {
+    if (pideps.size == 0) return false;
+    const arr = Array.from(pideps.keys());
+    const old_derived = current_derived;
+    const old_derived_used = current_derived_used;
+    current_derived = null; // this null ensures the true invalidation tests below don't add any derivations
+    try {
+        // this for finds all references in pideps that don't point to an invalidated derived, and stops as soon as it finds one
+        for (let i = 0; i < arr.length; i++) {
+            const weak = arr[i];
+            const derived = weak.deref();
+            if (!derived) {
+                pideps.delete(weak);
+                continue;
+            }
+            const old_value = pideps.get(weak);
+            // TODO! somehow ensure this can't cause an infinite recursive loop
+            const new_value = derived();
+            if (!Object.is(old_value, new_value)) return true;
+        }
+        // loop exited, no invalidations found, we are still valid
+        // add myself as derivations for all dependencies, so that i and my derivations can still be notified to changes non lazily
+        // this is only needed when revalidating due to an affect (not lazy), we do this only when one is involved
+        if (recreate_weak_link) {
+            for (let i = 0; i < arr.length; i++) {
+                const weak = arr[i];
+                const derived = weak.deref();
+                if (!derived) continue;
+                derived[sym_ders].add(recreate_weak_link);
+            }
+        }
+        return false;
+    } finally {
+        current_derived = old_derived;
+        current_derived_used = old_derived_used;
+    }
+}
+
 function Derived(name, derivator) {
     if (!new.target) throw new TypeError("Constructor Derived requires 'new'");
     if (arguments.length == 1) {
@@ -191,47 +238,24 @@ function Derived(name, derivator) {
                 current_derived_used = true;
             }
 
-            if (Derived[sym_weak]) {
+            const old_weak = Derived[sym_weak];
+            if (old_weak) {
                 if (!(sym_value in Derived)) {
                     // TODO! add information to help pin down the loop
                     throw new RangeError("Circular dependency between derives detected");
                 }
+                // TODO! somehow ensure this can't cause an infinite recursive loop
                 const pideps = Derived[sym_pideps];
-                if (pideps.size == 0) return Derived[sym_value];
-                const arr = Array.from(pideps.keys());
-                const old_derived = current_derived;
-                const old_derived_used = current_derived_used;
-                let invalidated = false;
-                current_derived = null; // this null ensures the true invalidation tests below don't add any derivations
-                try {
-                    // this for finds all references in pideps that don't point to an invalidated derived, and stops as soon as it finds one
-                    for (let i = 0; i < arr.length; i++) {
-                        const weak = arr[i];
-                        const derived = weak.deref();
-                        if (!derived) {
-                            pideps.delete(weak);
-                            continue;
-                        }
-                        const old_value = pideps.get(weak);
-                        // TODO! somehow ensure this can't cause an infinite recursive loop
-                        const new_value = derived();
-                        if (!Object.is(old_value, new_value)) {
-                            invalidated = true;
-                            break;
-                        }
-                    }
-                } finally {
-                    current_derived = old_derived;
-                    current_derived_used = old_derived_used;
+                // TODO! since recreating the sym_ders link is only needed when revalidating due to an affect (not lazy), do this only when one is involved
+                if (!possibleInvalidationIsInvalidated(pideps, old_weak)) {
+                    return Derived[sym_value];
                 }
-                if (!invalidated) return Derived[sym_value];
                 pideps.clear();
             }
             const old_derived = current_derived;
             const old_derived_used = current_derived_used;
             current_derived = Derived;
             const old_value = Derived[sym_value];
-            const old_weak = Derived[sym_weak];
             try {
                 delete Derived[sym_value];
                 Derived[sym_weak] = new WeakRef(Derived);
@@ -251,6 +275,7 @@ function Derived(name, derivator) {
     Object.defineProperty(Derived, sym_ders, { value: new Set() });
     Object.defineProperty(Derived, sym_pideps, { value: new Map() });
     Object.defineProperty(Derived, sym_weak, { writable: true, value: null });
+    Object.defineProperty(Derived, sym_piweak, { writable: true, value: null });
     return Derived;
 }
 
@@ -277,6 +302,7 @@ defineProperties(Derived, {
         Object.defineProperty(derived, sym_ders, { value: new Set() });
         Object.defineProperty(derived, sym_pideps, { value: new Map() });
         Object.defineProperty(derived, sym_weak, { value: new WeakRef(derived) });
+        Object.defineProperty(Derived, sym_piweak, { value: null });
         return derived;
     },
     use(value) {
@@ -438,30 +464,29 @@ function affect() {
         affector[sym_affect]();
         return affector;
     }
-    const affect_async = function affect() {
-        if (affector[sym_affect_task] === false) {
-            affector[sym_affect_task] = true;
-            queueMicrotask(function affect() {
-                if (!affector[sym_affect] || !affector[sym_affect_task]) return;
-                affector[sym_affect_task] = false;
-                const old_derived = current_derived;
-                const old_derived_used = current_derived_used;
-                current_derived = affector;
-                try {
-                    current_derived_used = null;
-                    affector();
-                    if (!current_derived_used) clearAffect(affector);
-                } finally {
-                    current_derived = old_derived;
-                    current_derived_used = old_derived_used;
-                }
-            });
+    function affect(transitive) {
+        if (!affector[sym_affect] || !affector[sym_affect_task]) return;
+        affector[sym_affect_task] = false;
+        const pideps = affector[sym_pideps];
+        if (transitive && !possibleInvalidationIsInvalidated(pideps, affector[sym_weak])) {
+            return;
         }
-    };
-
+        pideps.clear();
+        const old_derived = current_derived;
+        const old_derived_used = current_derived_used;
+        current_derived = affector;
+        try {
+            current_derived_used = null;
+            affector();
+            if (!current_derived_used) clearAffect(affector);
+        } finally {
+            current_derived = old_derived;
+            current_derived_used = old_derived_used;
+        }
+    }
     Object.defineProperty(affector, sym_pideps, { configurable: true, value: new Map() }); //TODO! figure out how to correctly use this / if it is being correctly used
     Object.defineProperty(affector, sym_weak, { configurable: true, value: new WeakRef(affector) });
-    Object.defineProperty(affector, sym_affect, { configurable: true, value: affect_async });
+    Object.defineProperty(affector, sym_affect, { configurable: true, value: affect });
     Object.defineProperty(affector, sym_affect_refs, { configurable: true, value: new Set() });
     Object.defineProperty(affector, sym_affect_task, { configurable: true, writable: true, value: false });
 
@@ -532,11 +557,14 @@ defineProperties(affect, { clear: clearAffect });
 
 /** @param {Derived} target @param {boolean} [transitive] */
 function invalidateDerivation(target, transitive) {
-    if (target[sym_affect]) {
-        target[sym_affect]();
+    const affect_task = target[sym_affect];
+    if (affect_task) {
+        if (target[sym_affect_task] === false) {
+            target[sym_affect_task] = true;
+            queueMicrotask(() => affect_task(transitive));
+        }
         return;
     }
-    let weak = target[sym_weak];
     if (!transitive) target[sym_weak] = null;
     /** @type {Set<WeakRef<Derived>>} */
     const derivations = target[sym_ders];
@@ -546,6 +574,7 @@ function invalidateDerivation(target, transitive) {
     ) return;
     recursiveDerivationInvalidationGuard.add(target);
 
+    let weak = null;
     const copy = Array.from(derivations);
     derivations.clear();
     for (let i = 0; i < copy.length; i++) {
@@ -553,13 +582,11 @@ function invalidateDerivation(target, transitive) {
         /* istanbul ignore next */
         if (derived && derived[sym_weak] === copy[i]) {
             if (!weak) weak = new WeakRef(target);
-            // TODO! it is clear here that the use of has here won't stop recursive loops if WeakRef is always being recreated
-            // altough recursiveDerivationInvalidationGuard is good to have, maybe we could rely on this instead, seems more correct
-            // this would require imply some weak ref that is permanent and does not track invalidation with a null value
             if (!derived[sym_pideps].has(weak)) {
                 derived[sym_pideps].set(weak, target[sym_value]);
-                invalidateDerivation(derived, true);
             }
+            // TODO! skip this call if the has call above returns true AND no affects are down the line waiting for invalidation
+            invalidateDerivation(derived, true);
         }
     }
     recursiveDerivationInvalidationGuard.delete(target);
@@ -769,6 +796,7 @@ function stateObjectUse(target, key) {
     let set = ders[key];
     if (!set) ders[key] = set = new Set();
     set.add(current_derived[sym_weak]);
+    current_derived_used = true;
 }
 
 //#endregion
@@ -1042,7 +1070,10 @@ const StateArrayProxyHandler = {
     //     return Reflect.isExtensible(target);
     // },
     ownKeys(target) {
-        if (current_derived) target[sym_all].add(current_derived[sym_weak]);
+        if (current_derived) {
+            target[sym_all].add(current_derived[sym_weak]);
+            current_derived_used = true;
+        }
         return Reflect.ownKeys(target);
     },
     // preventExtensions(target) {
@@ -1106,6 +1137,7 @@ function stateArrayUseProp(target, prop) {
     if (!current_derived) return;
     if (prop === "length") {
         target[sym_len].add(current_derived[sym_weak]);
+        current_derived_used = true;
         return;
     }
     const index = as_index(prop);
@@ -1126,6 +1158,7 @@ function stateArrayUseProp(target, prop) {
     } else {
         target[sym_len].add(current_derived[sym_weak]);
     }
+    current_derived_used = true;
 }
 
 //#region DerivedArray
@@ -1276,7 +1309,10 @@ function derivedMapArrayGet(target, index) {
     // return derived;
 
     const cached = new Derived(() => {
-        if (current_derived) set.add(current_derived[sym_weak]);
+        if (current_derived) {
+            set.add(current_derived[sym_weak]);
+            current_derived_used = true;
+        }
         // TODO! index
         return target[sym_derivator](target[sym_src][index], Derived.from(NaN), target[sym_src][sym_tracked]);
     });
