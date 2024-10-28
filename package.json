@@ -1,9 +1,21 @@
 {
     "name": "leviathan-state",
-    "version": "0.1.0",
+    "version": "0.0.0",
+    "description": "A state management library, observe changes without a compiler",
+    "main": "index.js",
+    "types": "index.d.ts",
+    "files": [
+        "index.js",
+        "index.d.ts"
+    ],
     "scripts": {
         "test": "jest --coverage --collectCoverageFrom index.js"
     },
+    "keywords": [
+        "state"
+    ],
+    "author": "kernel32dev",
+    "license": "MIT",
     "devDependencies": {
         "@types/jest": "^29.5.13",
         "jest": "^29.7.0",
