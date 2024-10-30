@@ -989,7 +989,7 @@ const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
     push() {
         const target = /** @type {StateArray} */ (this[sym_value]);
         if (arguments.length) {
-            for (let i = 0; i < arguments.length - 1; i++) {
+            for (let i = 0; i < arguments.length; i++) {
                 arguments[i] = track(arguments[i]);
             }
             Array.prototype.push.apply(target, arguments);
@@ -1015,7 +1015,7 @@ const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
     unshift() {
         const target = /** @type {StateArray} */ (this[sym_value]);
         if (arguments.length) {
-            for (let i = 0; i < arguments.length - 1; i++) {
+            for (let i = 0; i < arguments.length; i++) {
                 arguments[i] = track(arguments[i]);
             }
             Array.prototype.unshift.apply(target, arguments);
