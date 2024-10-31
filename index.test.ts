@@ -539,6 +539,31 @@ describe("affect", () => {
         await microtask;
         expect(effects).toEqual(["0", "1", "2"]);
     });
+    test("can clear affect during handler", async () => {
+        const trigger = new State<number | null>(null);
+        const affected = new State<string | null>(null);
+        Derived.affect(affected, function affector() {
+            if (trigger() == null) return;
+            Derived.affect.clear(affector);
+            const value = trigger(); // use trigger after clear
+            affected.set(String(value));
+        });
+        expect(trigger()).toBe(null);
+        expect(affected()).toBe(null);
+        await microtask;
+        expect(trigger()).toBe(null);
+        expect(affected()).toBe(null);
+
+        trigger.set(100);
+        await microtask;
+        expect(trigger()).toBe(100);
+        expect(affected()).toBe("100");
+
+        trigger.set(200); // invalidate trigger after the clear
+        await microtask;
+        expect(trigger()).toBe(200);
+        expect(affected()).toBe("100");
+    });
 });
 
 describe("tracked object", () => {

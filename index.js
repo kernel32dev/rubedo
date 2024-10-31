@@ -145,11 +145,11 @@ const sym_ders_rejected = Symbol("ders_rejected");
 /** @typedef {{ [sym_pideps]: Map<WeakRef<Derived>, any>, [sym_ders]: Set<WeakRef<Derived>>, [sym_weak]: WeakRef<Derived>, [sym_value]?: any }} Derived */
 /** @typedef {any[] & { [sym_ders]: Set<WeakRef<Derived>>[], [sym_slots]: Set<WeakRef<Derived>>[], [sym_len]: Set<WeakRef<Derived>>, [sym_all]: Set<WeakRef<Derived>>, [sym_value]: StateArray, [sym_tracked]: StateArray }} StateArray */
 
-/** if this value is set, it is the derived currently running at the top of the stack
+/** if this value is set, it is the weak ref of the derived currently running at the top of the stack
  *
  * if it is null, it means we are outside a derived
  *
- * @type {Derived | null} */
+ * @type {WeakRef<Derived> | null} */
 let current_derived = null;
 
 /** flag that is set everytime the derivation is used
@@ -273,7 +273,7 @@ function Derived(name, derivator) {
 
             if (current_derived) {
                 // add the current derivator as a derivation of myself
-                Derived[sym_ders].add(current_derived[sym_weak]);
+                Derived[sym_ders].add(current_derived);
                 current_derived_used = true;
             }
 
@@ -291,13 +291,14 @@ function Derived(name, derivator) {
                 }
                 pideps.clear();
             }
+            const new_weak = new WeakRef(Derived);
             const old_derived = current_derived;
             const old_derived_used = current_derived_used;
-            current_derived = Derived;
+            current_derived = new_weak;
             const old_value = Derived[sym_value];
             try {
                 delete Derived[sym_value];
-                Derived[sym_weak] = new WeakRef(Derived);
+                Derived[sym_weak] = new_weak;
                 const value = track(derivator());
                 return Derived[sym_value] = value;
             } catch (e) {
@@ -462,7 +463,7 @@ function State(name, value) {
             //if (current_derived === null) throw new Error("can't call a state outside of a derivation, use the now method or call this inside a derivation");
             if (current_derived) {
                 // add the current derivator as a derivation of myself
-                State[sym_ders].add(current_derived[sym_weak]);
+                State[sym_ders].add(current_derived);
                 current_derived_used = true;
             }
             return State[sym_value];
@@ -549,7 +550,7 @@ function affect() {
         pideps.clear();
         const old_derived = current_derived;
         const old_derived_used = current_derived_used;
-        current_derived = affector;
+        current_derived = affector[sym_weak];
         try {
             current_derived_used = null;
             affector();
@@ -571,7 +572,7 @@ function affect() {
 
     const old_derived = current_derived;
     const old_derived_used = current_derived_used;
-    current_derived = affector;
+    current_derived = affector[sym_weak];
     try {
         current_derived_used = false;
         affector();
@@ -976,7 +977,7 @@ defineProperties(StateObject, {
         if (!ders) return;
         let set = ders[sym_all];
         if (!set) ders[sym_all] = set = new Set();
-        set.add(current_derived[sym_weak]);
+        set.add(current_derived);
         current_derived_used = true;
     }
 });
@@ -1070,7 +1071,7 @@ function stateObjectUse(target, key) {
     const ders = target[sym_ders];
     let set = ders[key];
     if (!set) ders[key] = set = new Set();
-    set.add(current_derived[sym_weak]);
+    set.add(current_derived);
     current_derived_used = true;
 }
 
@@ -1164,7 +1165,7 @@ defineProperties(StateArray, {
         if (!target || typeof target !== "object" || !Array.isArray(target)) throw new TypeError("target must be an array");
         if (!current_derived || !(sym_len in target)) return;
         while (sym_src in target) target = target[sym_src];
-        target[sym_all].add(current_derived[sym_weak]);
+        target[sym_all].add(current_derived);
         current_derived_used = true;
     },
 });
@@ -1346,7 +1347,7 @@ const StateArrayProxyHandler = {
     // },
     ownKeys(target) {
         if (current_derived) {
-            target[sym_all].add(current_derived[sym_weak]);
+            target[sym_all].add(current_derived);
             current_derived_used = true;
         }
         return Reflect.ownKeys(target);
@@ -1411,7 +1412,7 @@ const StateArrayProxyHandler = {
 function stateArrayUseProp(target, prop) {
     if (!current_derived) return;
     if (prop === "length") {
-        target[sym_len].add(current_derived[sym_weak]);
+        target[sym_len].add(current_derived);
         current_derived_used = true;
         return;
     }
@@ -1424,14 +1425,14 @@ function stateArrayUseProp(target, prop) {
         const ders = target[sym_ders];
         set = ders[index];
         if (!set) ders[index] = set = new Set();
-        set.add(current_derived[sym_weak]);
+        set.add(current_derived);
 
         const slots = target[sym_slots];
         set = slots[index];
         if (!set) slots[index] = set = new Set();
-        set.add(current_derived[sym_weak]);
+        set.add(current_derived);
     } else {
-        target[sym_len].add(current_derived[sym_weak]);
+        target[sym_len].add(current_derived);
     }
     current_derived_used = true;
 }
@@ -1569,7 +1570,7 @@ function derivedMapArrayGet(target, index) {
     }
     //const fixed_set = target[sym_ders][index];
     //const derived_index = function DerivedIndex() {
-    //    if (current_derived) fixed_set.add(current_derived[sym_weak]);
+    //    if (current_derived) fixed_set.add(current_derived);
     //    return index;
     //};
 
@@ -1585,7 +1586,7 @@ function derivedMapArrayGet(target, index) {
 
     const cached = new Derived(() => {
         if (current_derived) {
-            set.add(current_derived[sym_weak]);
+            set.add(current_derived);
             current_derived_used = true;
         }
         // TODO! index
@@ -1708,7 +1709,7 @@ function promiseUseSetBySymbol(promise, sym) {
                 configurable: true,
             });
         }
-        set.add(current_derived[sym_weak]);
+        set.add(current_derived);
         current_derived_used = true;
     } else {
         track(promise);
