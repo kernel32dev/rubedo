@@ -158,7 +158,10 @@ let current_derived = null;
  */
 let current_derived_used = true;
 
-/** this may be unecessary because circular derivation is already being detected, but i could not prove this */
+/** this may be unecessary because circular derivation is already being detected, but i could not prove this
+ *
+ * note that it is safe to use a WeakSet here because all values referenced in this set are on the stack
+ */
 const recursiveDerivationInvalidationGuard = new WeakSet();
 
 /** a weak map of references that keep affect functions from being garbage collected
@@ -177,6 +180,20 @@ let WeakRef = NativeWeakRef;
 let debugRegistry = null;
 /** @type {((message: string) => void) | null} */
 let debugWeakRefLogger = null;
+
+const maximumFrozenComparisonsDepth = 10;
+/** how much Object.is can recurse before the recursion guard starts being used
+ *
+ * the comparator can't detect recursion before this runs out
+ */
+let remainingFrozenComparisonsDepth = maximumFrozenComparisonsDepth;
+/** the set of frozen objects being used in a State.is after all remainingFrozenComparisonsDepth were exausted
+ *
+ * note that it is safe to use a WeakSet here because all values referenced in this set are on the stack
+ *
+ * TODO! change this to a WeakMap<object, WeakSet<object>> to property track the pair of the comparison rather than just members
+ */
+const recursiveFrozenComparisonGuard = new WeakSet();
 
 //#endregion
 //#region Derived
@@ -221,7 +238,7 @@ function possibleInvalidationIsInvalidated(pideps, recreate_weak_link) {
             const old_value = pideps.get(weak);
             // TODO! somehow ensure this can't cause an infinite recursive loop
             const new_value = derived();
-            if (!Object.is(old_value, new_value)) return true;
+            if (!is(old_value, new_value)) return true;
         }
         // loop exited, no invalidations found, we are still valid
         // add myself as derivations for all dependencies, so that i and my derivations can still be notified to changes non lazily
@@ -379,7 +396,7 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
     },
     set(value) {
         value = track(value);
-        if (!Object.is(this[sym_value], value)) {
+        if (!is(this[sym_value], value)) {
             this[sym_value] = value;
             invalidateDerivationSet(this[sym_ders]);
         }
@@ -387,7 +404,7 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
     mut(transformer) {
         if (typeof transformer != "function") throw new TypeError("transformer is not a function");
         const value = track(transformer(this[sym_value]));
-        if (!Object.is(this[sym_value], value)) {
+        if (!is(this[sym_value], value)) {
             this[sym_value] = value;
             invalidateDerivationSet(this[sym_ders]);
         }
@@ -499,6 +516,8 @@ defineProperties(State, {
         Object.defineProperty(State, sym_setter, { value: setter });
         return State;
     },
+    freeze,
+    is,
     Object: StateObject,
     Array: StateArray,
 })
@@ -700,6 +719,7 @@ function track(value) {
     if (sym_tracked in value) return value[sym_tracked];
     const proto = Object.getPrototypeOf(value);
     if (!proto || proto == Object.prototype) {
+        if (!Object.isExtensible(value)) trackNonExtensibleError();
         const proxy = new Proxy(value, StateObjectProxyHandler);
         Object.defineProperty(value, sym_ders, { value: { __proto__: null } });
         Object.defineProperty(value, sym_tracked, { value: proxy });
@@ -723,10 +743,12 @@ function track(value) {
             // since writable and configurable is false, we can't update the property,
             // we can however change the way it is obtained through the proxy to return the correct tracked valued
             // hence we would need a call to the track function in the property getter
-            // however, that might be too much of a performance hit, for such a small edge case (frozen properties), so we are not doing that for now
+            // however, that might be too much of a performance hit, for such a small edge case (string-keyed data properties frozen before the call to track), so we are not doing that for now
+            console.warn(`State.track: Could not wrap with tracking the property with key ${key} of object, because it is not configurable nor writable`);
         }
         return proxy;
     } else if (proto == Array.prototype && Array.isArray(value)) {
+        if (!Object.isExtensible(value)) trackNonExtensibleError();
         const descriptors = Object.getOwnPropertyDescriptors(value);
         for (let key = 0; key < value.length; key++) {
             const descriptor = descriptors[key];
@@ -747,10 +769,12 @@ function track(value) {
             // since writable and configurable is false, we can't update the property,
             // we can however change the way it is obtained through the proxy to return the correct tracked valued
             // hence we would need a call to the track function in the property getter
-            // however, that might be too much of a performance hit, for such a small edge case (frozen properties), so we are not doing that for now
+            // however, that might be too much of a performance hit, for such a small edge case (string-keyed data properties frozen before the call to track), so we are not doing that for now
+            console.warn(`State.track: Could not wrap with tracking the item at index ${key} of array, because it is not configurable nor writable`);
         }
         return createStateArray(value, StateArrayPrototype);
     } else if (value instanceof Promise) {
+        if (!Object.isExtensible(value)) trackNonExtensibleError();
         const promise = Object.defineProperty(value, sym_tracked, { value });
         promise.then(
             function trackPromiseResolution(value) {
@@ -772,6 +796,162 @@ function track(value) {
         );
     }
     return value;
+}
+
+function trackNonExtensibleError() {
+    throw new TypeError("can't track object that is not extensible");
+}
+
+//#endregion
+//#region freeze
+
+function freeze(value) {
+    if (!value || typeof value != "object") return value;
+    if (sym_tracked in value) return value[sym_tracked];
+    const proto = Object.getPrototypeOf(value);
+    if (!proto || proto == Object.prototype) {
+        if (!Object.isExtensible(value)) trackNonExtensibleError();
+        Object.defineProperty(value, sym_ders, { value: { __proto__: null } });
+        Object.defineProperty(value, sym_tracked, { value: value });
+        const descriptors = Object.getOwnPropertyDescriptors(value);
+        for (const key in descriptors) {
+            const descriptor = descriptors[key];
+            if (!("value" in descriptor)) continue;
+            const old_prop_value = descriptor.value;
+            const new_prop_value = track(old_prop_value);
+            if (new_prop_value === old_prop_value) continue;
+            if (descriptor.writable) {
+                value[key] = new_prop_value;
+            } else if (descriptor.configurable) {
+                Object.defineProperty(value, key, {
+                    value: new_prop_value,
+                    writable: false,
+                    enumerable: descriptor.enumerable,
+                    configurable: true,
+                });
+            }
+            // since writable and configurable is false, we can't update the property,
+            // we can't even change the way it is obtained through the proxy to return the correct tracked valued, because there is no proxy for frozen objects
+            console.warn(`State.freeze: Could not wrap with tracking the property with key ${key} of object, because it is not configurable nor writable`);
+        }
+        return Object.freeze(value);
+    } else if (proto == Array.prototype && Array.isArray(value)) {
+        if (!Object.isExtensible(value)) trackNonExtensibleError();
+        const descriptors = Object.getOwnPropertyDescriptors(value);
+        for (let key = 0; key < value.length; key++) {
+            const descriptor = descriptors[key];
+            if (!("value" in descriptor)) continue;
+            const old_prop_value = descriptor.value;
+            const new_prop_value = track(old_prop_value);
+            if (new_prop_value === old_prop_value) continue;
+            if (descriptor.writable) {
+                value[key] = new_prop_value;
+            } else if (descriptor.configurable) {
+                Object.defineProperty(value, key, {
+                    value: new_prop_value,
+                    writable: false,
+                    enumerable: descriptor.enumerable,
+                    configurable: true,
+                });
+            }
+            // since writable and configurable is false, we can't update the property,
+            // we can't even change the way it is obtained through the proxy to return the correct tracked valued, because there is no proxy for frozen objects
+            console.warn(`State.freeze: Could not wrap with tracking the item at index ${key} of array, because it is not configurable nor writable`);
+        }
+        return Object.freeze(value);
+    } else if (value instanceof Promise) {
+        if (!Object.isExtensible(value)) trackNonExtensibleError();
+        const promise = Object.defineProperty(value, sym_tracked, { value });
+        promise.then(
+            function trackPromiseResolution(value) {
+                if (sym_resolved in promise || sym_rejected in promise) return;
+                Object.defineProperty(promise, sym_resolved, { value });
+                const ders = promise[sym_ders_resolved];
+                delete promise[sym_ders_resolved];
+                delete promise[sym_ders_rejected];
+                invalidateDerivationSet(ders);
+            },
+            function trackPromiseRejection(value) {
+                if (sym_resolved in promise || sym_rejected in promise) return;
+                Object.defineProperty(promise, sym_rejected, { value });
+                const ders = promise[sym_ders_rejected];
+                delete promise[sym_ders_resolved];
+                delete promise[sym_ders_rejected];
+                invalidateDerivationSet(ders);
+            },
+        );
+        return value;
+    }
+    return Object.freeze(value);
+}
+
+function is(a, b) {
+    if (Object.is(a, b)) return true;
+    if (typeof a != "object" || typeof b != "object" || !a || !b) return false;
+    // this may break if a proxy trap for getPrototype, isExtensible or ownKeys calls State.is from State.isr
+    // none of the aforementioned traps can call State.is or user code for now, so this is safe
+    remainingFrozenComparisonsDepth = maximumFrozenComparisonsDepth;
+    try {
+        return isr(a, b);
+    } catch {
+        return false;
+    }
+}
+
+function isr(a, b) {
+    if (Object.is(a, b)) return true;
+    if (typeof a != "object" || typeof b != "object" || !a || !b) return false;
+    let descriptors_a, descriptors_b;
+    try {
+        if (Object.getPrototypeOf(a) != Object.getPrototypeOf(b) || !Object.isFrozen(a) || !Object.isFrozen(b)) return false;
+        descriptors_a = Object.getOwnPropertyDescriptors(a);
+        descriptors_b = Object.getOwnPropertyDescriptors(b);
+    } catch {
+        return false;
+    }
+    for (const key_b in descriptors_b) {
+        const prop_b = descriptors_b[key_b];
+        if ("value" in prop_b && !(key_b in descriptors_a && "value" in descriptors_a[key_b])) return false;
+    }
+    if (remainingFrozenComparisonsDepth == 0) {
+        if (recursiveFrozenComparisonGuard.has(a) || recursiveFrozenComparisonGuard.has(b)) {
+            // State.is can't compare self referential frozen objects
+            return false;
+        }
+        recursiveFrozenComparisonGuard.add(a);
+        recursiveFrozenComparisonGuard.add(b);
+        try {
+            for (const key_a in descriptors_a) {
+                const prop_a = descriptors_a[key_a];
+                if ("value" in prop_a) {
+                    const prop_b = descriptors_b[key_a];
+                    if (!prop_b || !("value" in prop_b) || !isr(prop_a.value, prop_b.value)) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        } finally {
+            recursiveFrozenComparisonGuard.delete(a);
+            recursiveFrozenComparisonGuard.delete(b);
+        }
+    } else {
+        // it is safe to leave remainingFrozenComparisonsDepth dirty on the case of an exception
+        // because it will be reinitialized on the next call to State.is
+        remainingFrozenComparisonsDepth--;
+        for (const key_a in descriptors_a) {
+            const prop_a = descriptors_a[key_a];
+            if ("value" in prop_a) {
+                const prop_b = descriptors_b[key_a];
+                if (!prop_b || !("value" in prop_b) || !isr(prop_a.value, prop_b.value)) {
+                    remainingFrozenComparisonsDepth++;
+                    return false;
+                }
+            }
+        }
+        remainingFrozenComparisonsDepth++;
+        return true;
+    }
 }
 
 //#endregion
@@ -830,17 +1010,22 @@ const StateObjectProxyHandler = {
     },
     get(target, p, receiver) {
         if (typeof p == "string") {
-            stateObjectUse(target, p);
+            const d = Reflect.getOwnPropertyDescriptor(target, p);
+            if ((!d && Object.isExtensible(target)) || ("value" in d && (d.writable || d.configurable))) {
+                stateObjectUse(target, p);
+            }
             // the line below fixes the problem outlined in the track function
-            // it is commentend out because it is called very often and may not justify the potential performance hit for fixing a very small edge case (frozen properties)
+            // it is commentend out because it is called very often and may not justify the potential performance hit for fixing a very small edge case (string-keyed data properties frozen before the call to track)
             //return track(Reflect.get(target, p, receiver));
         }
         return Reflect.get(target, p, receiver);
     },
     getOwnPropertyDescriptor(target, p) {
-        const descriptor = Reflect.getOwnPropertyDescriptor(target, p);
-        if (typeof p == "string" && (!descriptor || "value" in descriptor)) stateObjectUse(target, p);
-        return descriptor;
+        const d = Reflect.getOwnPropertyDescriptor(target, p);
+        if (typeof p == "string" && ((!d && Object.isExtensible(target)) || ("value" in d && (d.writable || d.configurable)))) {
+            stateObjectUse(target, p);
+        }
+        return d;
     },
     // getPrototypeOf(target) {
     //     return Reflect.getPrototypeOf(target);

@@ -1,3 +1,10 @@
+// TODO! many descriptions in this file have multiple purposes:
+// 1. summary
+// 2. reference
+// 3. explaining the problem
+// 4. showing ideal usage
+// organize those descriptions and separate these components
+
 /** holds a value which is automatically updated once dependencies change
  *
  * to read the value, call this object
@@ -161,6 +168,38 @@ export const State: {
      * returns the value passed in, never throws errors
      */
     track<T>(value: T): T;
+
+    /** like `Object.freeze` but tracks items before freezing, allowing the object to be memoized
+     *
+     * this is useful to create "records" also known as "data objects", while also tracking the values inside
+     *
+     * that allows you to create a derivation that returns objects that can still be memoized
+     *
+     * because without it you would be creating a new object everytime and everytime it would
+     *
+     * note that you can also use `Object.freeze` to create data objects, but the properties won't be tracked
+     *
+     * frozen objects have special handling when being compared in leviathan
+     *
+     * frozen objects are compared equal to other frozen objects with the same string data properties and the same prototype, however the order can vary
+     *
+     * when comparing to check if the dependent derivations need to update
+     *
+     * does not freeze recursively, just like `Object.freeze`, but tracks recursively just like `State.track`
+     *
+     * returns the same object passed in, does not wrap it in a proxy
+     */
+    freeze<T>(value: T): Readonly<T>;
+
+    /** returns true if two values are the same, but handles frozen objects in a special way
+     *
+     * this function is used internally to determine if dependant derivations should be invalidated
+     *
+     * has the semantics of `Object.is`, but frozen objects with the same string data properties and the same prototype are compared equal
+     *
+     * works recursively, but may return false for self referential nested objects
+     */
+    is(a: any, b: any): boolean;
 
     /** creates a state that gives a view into a property of an object
      *

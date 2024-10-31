@@ -416,6 +416,44 @@ describe("type guards", () => {
             affect.clear(1);
         }).toThrow();
     });
+    describe("can't track object that is not extensible", () => {
+        test("State.track object", () => {
+            const x = Object.preventExtensions({});
+            expect(() => {
+                State.track(x);
+            }).toThrow();
+        });
+        test("State.track array", () => {
+            const x = Object.preventExtensions([]);
+            expect(() => {
+                State.track(x);
+            }).toThrow();
+        });
+        test("State.track promise", () => {
+            const x = Object.preventExtensions(new Promise(() => { }));
+            expect(() => {
+                State.track(x);
+            }).toThrow();
+        });
+        test("State.freeze object", () => {
+            const x = Object.preventExtensions({});
+            expect(() => {
+                State.freeze(x);
+            }).toThrow();
+        });
+        test("State.freeze array", () => {
+            const x = Object.preventExtensions([]);
+            expect(() => {
+                State.freeze(x);
+            }).toThrow();
+        });
+        test("State.freeze promise", () => {
+            const x = Object.preventExtensions(new Promise(() => { }));
+            expect(() => {
+                State.freeze(x);
+            }).toThrow();
+        });
+    });
 });
 
 if (false) describe("derivation region guards", () => {
@@ -691,5 +729,38 @@ describe("tracked promise", () => {
         expect(rejected()).toBe(undefined);
         await microtask;
         expect(rejected()).toBe("reason");
+    });
+});
+
+describe("State.is", () => {
+    test("frozen objects compare equal", () => {
+        const is = State.is;
+        const a = State.freeze({ first: 1, second: 2, third: 3 });
+        const b = State.freeze({ second: 2, first: 1, third: 3 });
+        const c = State.freeze({ first: 1, third: 3 });
+        expect(is(a, a)).toBe(true);
+        expect(is(b, b)).toBe(true);
+        expect(is(c, c)).toBe(true);
+    
+        expect(is(a, b)).toBe(true);
+        expect(is(b, a)).toBe(true);
+        expect(is(b, c)).toBe(false);
+        expect(is(c, b)).toBe(false);
+        expect(is(a, c)).toBe(false);
+        expect(is(c, a)).toBe(false);
+    });
+    test("recursive objects may return unequal", () => {
+        type RecursiveObject = {head:string, tail: RecursiveObject | null };
+
+        const a: RecursiveObject = { head: "value", tail: null };
+        a.tail = a;
+
+        const b: RecursiveObject = { head: "value", tail: null };
+        b.tail = b;
+
+        State.freeze(a);
+        State.freeze(b);
+
+        expect(State.is(a, b)).toBe(false);
     });
 });
