@@ -174,7 +174,10 @@ describe("Derivation memoized (possibly invalidated mechanism)", () => {
         const affects: ("yes" | "no")[] = [];
         function affector() { affects.push(derived3()); }
         new Effect(affects, affector);
-
+        expect(mock2).toHaveBeenCalledTimes(0);
+        expect(mock3).toHaveBeenCalledTimes(0);
+        expect(affects).toEqual([]);
+        await microtask;
         expect(mock2).toHaveBeenCalledTimes(1);
         expect(mock3).toHaveBeenCalledTimes(1);
         expect(affects).toEqual(["yes"]);
@@ -229,9 +232,17 @@ describe("Derivation memoized (possibly invalidated mechanism)", () => {
         expect(derived1()).toBe(0);
         expect(derived2()).toBe(true);
 
+        expect(mock1).toHaveBeenCalledTimes(1);
+        expect(mock2).toHaveBeenCalledTimes(1);
+
         const affects: boolean[] = [];
         function affector() { affects.push(derived2()); }
         new Effect(affects, affector);
+
+        expect(mock1).toHaveBeenCalledTimes(1);
+        expect(mock2).toHaveBeenCalledTimes(1);
+        expect(affects).toEqual([]);
+        await microtask;
 
         expect(mock1).toHaveBeenCalledTimes(1);
         expect(mock2).toHaveBeenCalledTimes(1);
@@ -508,6 +519,8 @@ describe("affect", () => {
         const affector = new Effect(effects, () => {
             effects.push(state());
         });
+        expect(effects).toEqual([]);
+        await microtask;
         expect(effects).toEqual([0]);
         state.set(1);
         await microtask;
@@ -527,6 +540,8 @@ describe("affect", () => {
         const affector = new Effect(effects, () => {
             effects.push(derived());
         });
+        expect(effects).toEqual([]);
+        await microtask;
         expect(effects).toEqual(["0"]);
         state.set(1);
         await microtask;
@@ -766,7 +781,7 @@ describe("State.is", () => {
         expect(is(a, a)).toBe(true);
         expect(is(b, b)).toBe(true);
         expect(is(c, c)).toBe(true);
-    
+
         expect(is(a, b)).toBe(true);
         expect(is(b, a)).toBe(true);
         expect(is(b, c)).toBe(false);

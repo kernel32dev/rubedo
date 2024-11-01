@@ -592,7 +592,7 @@ function Effect() {
 Effect.prototype = AffectorPrototype;
 
 defineProperties(Effect, {
-    Persistent(name, affector) {
+	Persistent: function Persistent(name, affector) {
         if (!new.target) throw new TypeError("Constructor Effect.Persistent requires 'new'");
         if (arguments.length == 1) {
             affector = name;
@@ -602,7 +602,7 @@ defineProperties(Effect, {
         if (affector[sym_affect_task] !== undefined) affectFunctionsRefs.add(affector);
         return affector;
     },
-    Weak(name, affector) {
+	Weak: function Weak(name, affector) {
         if (!new.target) throw new TypeError("Constructor Effect.Weak requires 'new'");
         if (arguments.length == 1) {
             affector = name;
@@ -645,19 +645,8 @@ function createAffector(name, affector, prototype) {
     Object.defineProperty(obj, sym_pideps, { value: new Map() });
     Object.defineProperty(obj, sym_weak, { value: weak });
     Object.defineProperty(obj, sym_affect, { value: affect });
-    Object.defineProperty(obj, sym_affect_task, { writable: true, value: null });
-
-    const old_derived = current_derived;
-    const old_derived_used = current_derived_used;
-    current_derived = weak;
-    try {
-        current_derived_used = false;
-        affector(obj);
-        if (!current_derived_used) clearAffector(obj);
-    } finally {
-        current_derived = old_derived;
-        current_derived_used = old_derived_used;
-    }
+    Object.defineProperty(obj, sym_affect_task, { writable: true, value: false });
+    queueMicrotask(affect);
     return obj;
 }
 

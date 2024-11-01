@@ -229,7 +229,7 @@ export namespace State {
  *
  * the last argument is the affector function, which will rerun whenever it dependencies
  *
- * the constructor calls the affector syncronously, and schedules a task to run it again when the dependencies change
+ * the constructor schedules a task for the affector to run asyncronously, and schedules a task again when the dependencies change
  *
  * the affector will keep on affecting until the affector object is garbage collected or it is cleared with the clear method
  *
@@ -292,7 +292,7 @@ export const Effect: {
         new (name: string, affector: (affector: Effect) => void): Effect;
     };
 
-    /** creates an affector that is your resposibilty to ensure it does not get garbage collected
+    /** creates an affector that may be garbage collected, making it your resposibilty to ensure it does not get garbage collected
      *
      * see the constructor for more information
      */
