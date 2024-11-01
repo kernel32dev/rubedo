@@ -235,9 +235,9 @@ export namespace State {
  *
  * before the affector you can specify the objects or symbols that your function affects, which will guarantee that the affector keeps running until they are garbage collected
  *
- * you can also call Affector.persistent to create a global affector that won't be garbage collected until it is cleared, so it will affect forever or until its the clear methods is called
+ * you can also call Effect.persistent to create a global affector that won't be garbage collected until it is cleared, so it will affect forever or until its the clear methods is called
  *
- * or you can  call Affector.weak to create an affector that has no references to itself, making it your resposibility to ensure it does not get garbage collected
+ * or you can  call Effect.weak to create an affector that has no references to itself, making it your resposibility to ensure it does not get garbage collected
  *
  * note that affected is not the dependencies to the affector, but rather, the objets that are affected by your affector
  *
@@ -245,7 +245,7 @@ export namespace State {
  *
  * another example, if you intend to log something to the console, and thus you want the affect to last forever, you could pass `console.log` or even `console` as the affected, these would cause the affecto to live forever since console will never be garbage collected
  *
- * because not adding references will likely cause the affect to be prematurely stopped, in order to create one without them you must specify it explicitly with `Affector.Weak` since for most cases that is not what you want and would simply be bug
+ * because not adding references will likely cause the affect to be prematurely stopped, in order to create one without them you must specify it explicitly with `Effect.Weak` since for most cases that is not what you want and would simply be bug
  *
  * the fact the affector can be garbage collected is a feature meant to avoid the need to necessarily call clear on it, if everything it could affect is gone then it is safe to discard it
  *
@@ -255,7 +255,7 @@ export namespace State {
  *
  * the task scheduled is a microtask, it runs on the same loop and with the same priority as promises
  */
-export interface Affector {
+export interface Effect {
     /** stops this affector from being called, if a task is pending, it will be called syncronously
      *
      * further calls to other methods will do nothing
@@ -276,20 +276,20 @@ export interface Affector {
     /** the name specified when creating this object */
     readonly name: string;
 }
-export const Affector: {
-    new (affected: WeakKey, affector: (affector: Affector) => void): Affector;
-    new (...args: [WeakKey, ...WeakKey[], (affector: Affector) => void]): Affector;
-    new (name: string, affected: WeakKey, affector: (affector: Affector) => void): Affector;
-    new (name: string, ...args: [WeakKey, ...WeakKey[], (affector: Affector) => void]): Affector;
-    prototype: Affector;
+export const Effect: {
+    new (affected: WeakKey, affector: (affector: Effect) => void): Effect;
+    new (...args: [WeakKey, ...WeakKey[], (affector: Effect) => void]): Effect;
+    new (name: string, affected: WeakKey, affector: (affector: Effect) => void): Effect;
+    new (name: string, ...args: [WeakKey, ...WeakKey[], (affector: Effect) => void]): Effect;
+    prototype: Effect;
 
     /** creates an affector that won't get garbage collected before the call to clear
      *
      * see the constructor for more information
      */
     Persistent: {
-        new (affector: (affector: Affector) => void): Affector;
-        new (name: string, affector: (affector: Affector) => void): Affector;
+        new (affector: (affector: Effect) => void): Effect;
+        new (name: string, affector: (affector: Effect) => void): Effect;
     };
 
     /** creates an affector that is your resposibilty to ensure it does not get garbage collected
@@ -297,8 +297,8 @@ export const Affector: {
      * see the constructor for more information
      */
     Weak: {
-        new(affector: (affector: Affector) => void): Affector;
-        new(name: string, affector: (affector: Affector) => void): Affector;
+        new(affector: (affector: Effect) => void): Effect;
+        new(name: string, affector: (affector: Effect) => void): Effect;
     };
 };
 

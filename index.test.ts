@@ -1,4 +1,4 @@
-import { Affector, Derived, State } from ".";
+import { Effect, Derived, State } from ".";
 
 /** await this promise to wait for all microtasks to complete */
 const microtask = Promise.resolve();
@@ -173,7 +173,7 @@ describe("Derivation memoized (possibly invalidated mechanism)", () => {
 
         const affects: ("yes" | "no")[] = [];
         function affector() { affects.push(derived3()); }
-        new Affector(affects, affector);
+        new Effect(affects, affector);
 
         expect(mock2).toHaveBeenCalledTimes(1);
         expect(mock3).toHaveBeenCalledTimes(1);
@@ -231,7 +231,7 @@ describe("Derivation memoized (possibly invalidated mechanism)", () => {
 
         const affects: boolean[] = [];
         function affector() { affects.push(derived2()); }
-        new Affector(affects, affector);
+        new Effect(affects, affector);
 
         expect(mock1).toHaveBeenCalledTimes(1);
         expect(mock2).toHaveBeenCalledTimes(1);
@@ -505,7 +505,7 @@ describe("affect", () => {
     test("affecting on State changes", async () => {
         const effects: number[] = [];
         const state = new State(0);
-        const affector = new Affector(effects, () => {
+        const affector = new Effect(effects, () => {
             effects.push(state());
         });
         expect(effects).toEqual([0]);
@@ -524,7 +524,7 @@ describe("affect", () => {
         const effects: string[] = [];
         const state = new State(0);
         const derived = new Derived(() => String(state()));
-        const affector = new Affector(effects, () => {
+        const affector = new Effect(effects, () => {
             effects.push(derived());
         });
         expect(effects).toEqual(["0"]);
@@ -542,7 +542,7 @@ describe("affect", () => {
     test("can clear affect during handler", async () => {
         const trigger = new State<number | null>(null);
         const affected = new State<string | null>(null);
-        new Affector(affected, affector => {
+        new Effect(affected, affector => {
             if (trigger() == null) return;
             affector.clear();
             const value = trigger(); // use trigger after clear

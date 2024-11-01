@@ -173,7 +173,7 @@ const recursiveDerivationInvalidationGuard = new WeakSet();
  * @type {WeakMap<object | symbol, Set>} */
 const affectFunctionsWeakRefs = new WeakMap();
 
-/** a strong set of `Affector.Persistent` referenced that keep affect functions from being garbage collected
+/** a strong set of `Effect.Persistent` referenced that keep affect functions from being garbage collected
  *
  * @type {Set} */
 const affectFunctionsRefs = new Set();
@@ -529,10 +529,10 @@ defineProperties(State, {
 State.prototype = StatePrototype;
 
 //#endregion State
-//#region Affector
+//#region Effect
 
 const AffectorPrototype = defineProperties({}, {
-    constructor: Affector,
+    constructor: Effect,
     clear() {
         const affect_task = this[sym_affect_task];
         if (affect_task === undefined) return;
@@ -566,9 +566,9 @@ Object.defineProperty(AffectorPrototype, "active", {
     configurable: true,
 });
 
-function Affector() {
-    if (!new.target) throw new TypeError("Constructor Affector requires 'new'");
-    if (arguments.length < 2) throw new TypeError("Failed to construct 'Affector' 2 arguments required, but only " + arguments.length + " present");
+function Effect() {
+    if (!new.target) throw new TypeError("Constructor Effect requires 'new'");
+    if (arguments.length < 2) throw new TypeError("Failed to construct 'Effect' 2 arguments required, but only " + arguments.length + " present");
     let name = "", i = 0;
     if (typeof arguments[0] == "string") {
         i = 1;
@@ -589,11 +589,11 @@ function Affector() {
     return affector;
 }
 
-Affector.prototype = AffectorPrototype;
+Effect.prototype = AffectorPrototype;
 
-defineProperties(Affector, {
+defineProperties(Effect, {
     Persistent(name, affector) {
-        if (!new.target) throw new TypeError("Constructor Affector.Persistent requires 'new'");
+        if (!new.target) throw new TypeError("Constructor Effect.Persistent requires 'new'");
         if (arguments.length == 1) {
             affector = name;
             name = "";
@@ -603,7 +603,7 @@ defineProperties(Affector, {
         return affector;
     },
     Weak(name, affector) {
-        if (!new.target) throw new TypeError("Constructor Affector.Weak requires 'new'");
+        if (!new.target) throw new TypeError("Constructor Effect.Weak requires 'new'");
         if (arguments.length == 1) {
             affector = name;
             name = "";
@@ -614,7 +614,7 @@ defineProperties(Affector, {
 
 function createAffector(name, affector, prototype) {
     if (typeof affector != "function") throw new TypeError("affector is not a function");
-    name = name || affector.name || "Affector";
+    name = name || affector.name || "Effect";
     const obj = Object.create(prototype);
     const weak = new WeakRef(obj);
     const affect = {
@@ -1764,5 +1764,5 @@ module.exports = {
     __proto__: null,
     Derived,
     State,
-    Affector,
+    Effect,
 };
