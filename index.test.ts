@@ -1,4 +1,4 @@
-import { Derived, State } from ".";
+import { Affector, Derived, State } from ".";
 
 /** await this promise to wait for all microtasks to complete */
 const microtask = Promise.resolve();
@@ -173,7 +173,7 @@ describe("Derivation memoized (possibly invalidated mechanism)", () => {
 
         const affects: ("yes" | "no")[] = [];
         function affector() { affects.push(derived3()); }
-        Derived.affect(affects, affector);
+        new Affector(affects, affector);
 
         expect(mock2).toHaveBeenCalledTimes(1);
         expect(mock3).toHaveBeenCalledTimes(1);
@@ -231,7 +231,7 @@ describe("Derivation memoized (possibly invalidated mechanism)", () => {
 
         const affects: boolean[] = [];
         function affector() { affects.push(derived2()); }
-        Derived.affect(affects, affector);
+        new Affector(affects, affector);
 
         expect(mock1).toHaveBeenCalledTimes(1);
         expect(mock2).toHaveBeenCalledTimes(1);
@@ -505,7 +505,7 @@ describe("affect", () => {
     test("affecting on State changes", async () => {
         const effects: number[] = [];
         const state = new State(0);
-        const affector = Derived.affect(effects, () => {
+        const affector = new Affector(effects, () => {
             effects.push(state());
         });
         expect(effects).toEqual([0]);
@@ -515,7 +515,7 @@ describe("affect", () => {
         state.set(2);
         await microtask;
         expect(effects).toEqual([0, 1, 2]);
-        Derived.affect.clear(affector);
+        affector.clear();
         state.set(3);
         await microtask;
         expect(effects).toEqual([0, 1, 2]);
@@ -524,7 +524,7 @@ describe("affect", () => {
         const effects: string[] = [];
         const state = new State(0);
         const derived = new Derived(() => String(state()));
-        const affector = Derived.affect(effects, () => {
+        const affector = new Affector(effects, () => {
             effects.push(derived());
         });
         expect(effects).toEqual(["0"]);
@@ -534,7 +534,7 @@ describe("affect", () => {
         state.set(2);
         await microtask;
         expect(effects).toEqual(["0", "1", "2"]);
-        Derived.affect.clear(affector);
+        affector.clear();
         state.set(3);
         await microtask;
         expect(effects).toEqual(["0", "1", "2"]);
@@ -542,9 +542,9 @@ describe("affect", () => {
     test("can clear affect during handler", async () => {
         const trigger = new State<number | null>(null);
         const affected = new State<string | null>(null);
-        Derived.affect(affected, function affector() {
+        new Affector(affected, affector => {
             if (trigger() == null) return;
-            Derived.affect.clear(affector);
+            affector.clear();
             const value = trigger(); // use trigger after clear
             affected.set(String(value));
         });

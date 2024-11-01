@@ -22,6 +22,8 @@ export interface Derived<out T> {
 
     /** creates a new derivation using the derivator specified to transform the value */
     derive<U>(derivator: (value: T) => U): Derived<U>;
+    /** the name specified when creating this object */
+    readonly name: string;
 }
 export const Derived: {
     /** creates a new derived, does not call the derivator immediatly, only calls it when needed,
@@ -47,47 +49,6 @@ export const Derived: {
      */
     use<T>(value: T | Derived<T>): T;
 
-    /** do something when the value changes (not lazy)
-     *
-     * this is a primitive of the leviathan-state library and should be handled with care
-     *
-     * calls the function syncronously, and schedule a task to run it again when the dependencies change
-     *
-     * the affector will keep on affecting until the affector is garbage collected or it is cleared with `affect.clear`
-     *
-     * the affecteds are a list of objects or symbols that will guarantee that the affector keeps running until they are garbage collected
-     *
-     * if affected is `"everything"` the affect will have a global strong reference and will never be garbage collected, so it will affect forever or until affect.clear is called
-     *
-     * if affected is `"nothing"` the affect will be granted no references strong or weak, making it your resposibility to ensure it does not get garbage collected
-     *
-     * note that affected is not the dependencies to the affector, but rather, the objets that are affected by your function
-     *
-     * for example, if you intend update a text node on the dom with new values whenever some derived changes, the text node is the object you must pass as the affected
-     *
-     * another example, if you intend to log something to the console, and thus you want the affect to last forever, you could pass `"everything"` or `console.log` as the affected, these would have the same effect
-     *
-     * because not adding references will likely cause the affect to be prematurely stopped, in order to create one without them you must specify it explicitly with `"nothing"` since for most cases that is not what you want and would simply be bug
-     *
-     * multiple affecteds can be passed in
-     *
-     * the task scheduled is a microtask, it runs on the same loop and with the same priority as promises
-     *
-     * returns the same function passed in
-     *
-     * calling affect twice on the same function causes the task to scheduled again, in the same manner as if its dependencies had changed
-     *
-     * if new affecteds are specifed on subsequent calls, then they are added
-     */
-    affect: {
-        <T extends () => void>(affected: object | symbol | "everything" | "nothing", affector: T): T;
-        <T extends () => void>(...affected: [object | symbol, ...(object | symbol)[], T]): T;
-        /** the opposite of affect, causes the affector configured with affect to no longer be called when dependencies change
-         *
-         * if a call to the affector is pending, it will run syncronously now
-         */
-        clear(affector: () => void): void;
-    };
     /** set this property to a function to log when any `WeakRef` created by leviathan is garbage collected */
     debugLogWeakRefCleanUp: ((message: string) => void) | null,
 };
@@ -118,6 +79,8 @@ export interface State<in out T> extends Derived<T> {
      * don't clone the object unless necessary
      */
     mut<U extends T>(transform: (value: T) => U): void;
+    /** the name specified when creating this object */
+    readonly name: string;
 }
 export const State: {
     /** creates a new state, with the value passed as the initial value,
@@ -259,6 +222,85 @@ export const State: {
 export namespace State {
     type Or<T> = T | Derived<T> | State<T>;
 }
+
+/** do something when the dependencies changes (not lazy)
+ *
+ * this is a primitive of the leviathan-state library and should be handled with care
+ *
+ * the last argument is the affector function, which will rerun whenever it dependencies
+ *
+ * the constructor calls the affector syncronously, and schedules a task to run it again when the dependencies change
+ *
+ * the affector will keep on affecting until the affector object is garbage collected or it is cleared with the clear method
+ *
+ * before the affector you can specify the objects or symbols that your function affects, which will guarantee that the affector keeps running until they are garbage collected
+ *
+ * you can also call Affector.persistent to create a global affector that won't be garbage collected until it is cleared, so it will affect forever or until its the clear methods is called
+ *
+ * or you can  call Affector.weak to create an affector that has no references to itself, making it your resposibility to ensure it does not get garbage collected
+ *
+ * note that affected is not the dependencies to the affector, but rather, the objets that are affected by your affector
+ *
+ * for example, if you intend update a text node on the dom with new values whenever some derived changes, the text node is the object you must pass as the affected
+ *
+ * another example, if you intend to log something to the console, and thus you want the affect to last forever, you could pass `console.log` or even `console` as the affected, these would cause the affecto to live forever since console will never be garbage collected
+ *
+ * because not adding references will likely cause the affect to be prematurely stopped, in order to create one without them you must specify it explicitly with `Affector.Weak` since for most cases that is not what you want and would simply be bug
+ *
+ * the fact the affector can be garbage collected is a feature meant to avoid the need to necessarily call clear on it, if everything it could affect is gone then it is safe to discard it
+ *
+ * do not rely on the garbage collector for the correctness of your program, rely on it only to clear up things you no longer need
+ *
+ * if you did not setup the references correctly the affector may be prematurely garbage collected, causing some very hard to find bugs
+ *
+ * the task scheduled is a microtask, it runs on the same loop and with the same priority as promises
+ */
+export interface Affector {
+    /** stops this affector from being called, if a task is pending, it will be called syncronously
+     *
+     * further calls to other methods will do nothing
+     */
+    clear(): void;
+    /** schedules this affector to be executed in a microtask
+     *
+     * does nothing if the affector was already cleared
+     */
+    trigger(): void;
+    /** runs the affector syncronously, if a task was pending, it is clears the task before the call
+     *
+     * does nothing if the affector was already cleared
+     */
+    run(): void;
+    /** true if this affector has not yet been cleared */
+    readonly active: boolean;
+    /** the name specified when creating this object */
+    readonly name: string;
+}
+export const Affector: {
+    new (affected: WeakKey, affector: (affector: Affector) => void): Affector;
+    new (...args: [WeakKey, ...WeakKey[], (affector: Affector) => void]): Affector;
+    new (name: string, affected: WeakKey, affector: (affector: Affector) => void): Affector;
+    new (name: string, ...args: [WeakKey, ...WeakKey[], (affector: Affector) => void]): Affector;
+    prototype: Affector;
+
+    /** creates an affector that won't get garbage collected before the call to clear
+     *
+     * see the constructor for more information
+     */
+    Persistent: {
+        new (affector: (affector: Affector) => void): Affector;
+        new (name: string, affector: (affector: Affector) => void): Affector;
+    };
+
+    /** creates an affector that is your resposibilty to ensure it does not get garbage collected
+     *
+     * see the constructor for more information
+     */
+    Weak: {
+        new(affector: (affector: Affector) => void): Affector;
+        new(name: string, affector: (affector: Affector) => void): Affector;
+    };
+};
 
 declare global {
     interface Array<T> {

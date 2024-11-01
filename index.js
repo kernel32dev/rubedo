@@ -80,11 +80,15 @@ const sym_derivator = Symbol("derivator");
  *
  * when those derivations are invalidated, a microtask is scheduled to automatically rerun the derivator
  *
- * the value is a `boolean | null`, and it is a boolean when the microtask is scheduled, and null when not
+ * the value is a `boolean | null | undefined`
  *
- * if it is true that mean the invalidation is transitive
+ * if it is true that mean the microtask is scheduled and the invalidation is transitive
  *
- * if it is false that mean the invalidation is not transitive
+ * if it is false that mean the microtask is scheduled and the invalidation is not transitive
+ *
+ * if it is null that means the microtask is not scheduled
+ *
+ * if it is undefined that means the affector is cleared
  */
 const sym_affect_task = Symbol("affect_task");
 
@@ -164,12 +168,12 @@ let current_derived_used = true;
  */
 const recursiveDerivationInvalidationGuard = new WeakSet();
 
-/** a weak map of references that keep affect functions from being garbage collected
+/** a weak map of references that keep affector objects from being garbage collected
  *
  * @type {WeakMap<object | symbol, Set>} */
 const affectFunctionsWeakRefs = new WeakMap();
 
-/** a strong set of `"everything"` referenced that keep affect functions from being garbage collected
+/** a strong set of `Affector.Persistent` referenced that keep affect functions from being garbage collected
  *
  * @type {Set} */
 const affectFunctionsRefs = new Set();
@@ -348,7 +352,6 @@ defineProperties(Derived, {
     use(value) {
         return value instanceof Derived ? value() : track(value);
     },
-    affect,
 })
 
 Object.defineProperty(Derived, "debugLogWeakRefCleanUp", {
@@ -526,124 +529,163 @@ defineProperties(State, {
 State.prototype = StatePrototype;
 
 //#endregion State
-//#region affect
+//#region Affector
 
-function affect() {
-    if (arguments.length < 2) throw new TypeError("undefined is not a function");
-    const affector = arguments[arguments.length - 1];
-    if (typeof affector != "function") throw new TypeError("affector is not a function");
-    const everything = arguments.length == 2 && arguments[0] === "everything";
-    const nothing = arguments.length == 2 && arguments[0] === "nothing";
-    if (affector[sym_affect]) {
-        if (!nothing) addAffectRefs(affector, everything ? null : arguments);
-        affector[sym_affect]();
-        return affector;
-    }
-    function affect() {
-        const transitive = affector[sym_affect_task];
-        if (typeof transitive != "boolean") return;
-        affector[sym_affect_task] = null;
-        const pideps = affector[sym_pideps];
-        if (transitive && !possibleInvalidationIsInvalidated(pideps, affector[sym_weak])) {
-            return;
-        }
-        pideps.clear();
-        const old_derived = current_derived;
-        const old_derived_used = current_derived_used;
-        current_derived = affector[sym_weak];
+const AffectorPrototype = defineProperties({}, {
+    constructor: Affector,
+    clear() {
+        const affect_task = this[sym_affect_task];
+        if (affect_task === undefined) return;
         try {
-            current_derived_used = null;
-            affector();
-            if (!current_derived_used) clearAffect(affector);
+            this[sym_affect]();
         } finally {
-            current_derived = old_derived;
-            current_derived_used = old_derived_used;
+            if (this[sym_affect_task] !== undefined) {
+                clearAffector(this);
+            }
         }
+    },
+    trigger() {
+        const affect_task = this[sym_affect_task];
+        if (affect_task !== undefined) {
+            this[sym_affect_task] = false;
+            if (affect_task) queueMicrotask(this[sym_affect]);
+        }
+    },
+    run() {
+        if (this[sym_affect_task] !== undefined) {
+            this[sym_affect_task] = false;
+            this[sym_affect]();
+        }
+    },
+});
+
+Object.defineProperty(AffectorPrototype, "active", {
+    get() {
+        return this[sym_affect_task] !== undefined;
+    },
+    configurable: true,
+});
+
+function Affector() {
+    if (!new.target) throw new TypeError("Constructor Affector requires 'new'");
+    if (arguments.length < 2) throw new TypeError("Failed to construct 'Affector' 2 arguments required, but only " + arguments.length + " present");
+    let name = "", i = 0;
+    if (typeof arguments[0] == "string") {
+        i = 1;
+        name = arguments[0];
     }
-    const weak = new WeakRef(affector);
-    Object.defineProperty(affector, sym_pideps, { configurable: true, value: new Map() }); //TODO! figure out how to correctly use this / if it is being correctly used
-    Object.defineProperty(affector, sym_weak, { configurable: true, value: weak });
-    Object.defineProperty(affector, sym_piweak, { configurable: true, value: weak });
-    Object.defineProperty(affector, sym_affect, { configurable: true, value: affect });
-    Object.defineProperty(affector, sym_affect_refs, { configurable: true, value: new Set() });
-    Object.defineProperty(affector, sym_affect_task, { configurable: true, writable: true, value: null });
-
-    if (!nothing) addAffectRefs(affector, everything ? null : arguments);
-
-    const old_derived = current_derived;
-    const old_derived_used = current_derived_used;
-    current_derived = affector[sym_weak];
-    try {
-        current_derived_used = false;
-        affector();
-        if (!current_derived_used) clearAffect(affector);
-    } finally {
-        current_derived = old_derived;
-        current_derived_used = old_derived_used;
+    const affector = createAffector(name, arguments[arguments.length - 1], typeof new.target.prototype == "object" ? new.target.prototype : AffectorPrototype);
+    if (affector[sym_affect_task] !== undefined) {
+        const refs = new Set();
+        Object.defineProperty(affector, sym_affect_refs, { value: refs });
+        for (; i < arguments.length - 1; i++) {
+            const reference = arguments[i];
+            let set = affectFunctionsWeakRefs.get(reference);
+            if (!set) affectFunctionsWeakRefs.set(reference, set = new Set());
+            set.add(affector);
+            refs.add(reference);
+        }
     }
     return affector;
 }
 
-/** @param {IArguments | null} references  */
-function addAffectRefs(affector, references) {
-    /** @type {Set<symbol | object>} */
-    const refs = affector[sym_affect_refs];
-    if (references) {
-        for (let i = 0; i < references.length - 1; i++) {
-            const reference = references[i];
-            refs.add(reference);
-            let set = affectFunctionsWeakRefs.get(reference);
-            if (!set) affectFunctionsWeakRefs.set(reference, set = new Set());
+Affector.prototype = AffectorPrototype;
 
-            set.add(affector);
+defineProperties(Affector, {
+    Persistent(name, affector) {
+        if (!new.target) throw new TypeError("Constructor Affector.Persistent requires 'new'");
+        if (arguments.length == 1) {
+            affector = name;
+            name = "";
         }
-    } else {
-        if (refs.size) {
-            for (const i of refs) {
-                const set = affectFunctionsWeakRefs.get(refs);
-                if (set) set.delete(affector);
-            }
+        affector = createAffector(name, affector, typeof new.target.prototype == "object" ? new.target.prototype : AffectorPrototype);
+        if (affector[sym_affect_task] !== undefined) affectFunctionsRefs.add(affector);
+        return affector;
+    },
+    Weak(name, affector) {
+        if (!new.target) throw new TypeError("Constructor Affector.Weak requires 'new'");
+        if (arguments.length == 1) {
+            affector = name;
+            name = "";
         }
-        affectFunctionsRefs.add(affector);
-    }
-}
+        return createAffector(name, affector, typeof new.target.prototype == "object" ? new.target.prototype : AffectorPrototype);
+    },
+})
 
-function clearAffect(affector) {
+function createAffector(name, affector, prototype) {
     if (typeof affector != "function") throw new TypeError("affector is not a function");
-    const affect_task = affector[sym_affect_task];
-    if (affect_task === undefined) return;
-    try {
-        affector[sym_affect]();
-    } finally {
-        const refs = affector[sym_affect_refs];
-        delete affector[sym_affect_task];
-        delete affector[sym_ders];
-        delete affector[sym_pideps];
-        delete affector[sym_weak];
-        delete affector[sym_piweak];
-        delete affector[sym_affect];
-        delete affector[sym_affect_refs];
-        if (refs) {
-            for (const i of refs) {
-                /** @type {Set | undefined} */
-                const set = affectFunctionsWeakRefs.get(i);
-                if (set && set.delete(affector) && set.size == 0) {
-                    affectFunctionsWeakRefs.delete(i);
-                }
+    name = name || affector.name || "Affector";
+    const obj = Object.create(prototype);
+    const weak = new WeakRef(obj);
+    const affect = {
+        [name]() {
+            const transitive = obj[sym_affect_task];
+            if (typeof transitive != "boolean") return;
+            obj[sym_affect_task] = null;
+            const pideps = obj[sym_pideps];
+            if (transitive && !possibleInvalidationIsInvalidated(pideps, weak)) {
+                return;
+            }
+            pideps.clear();
+
+            const old_derived = current_derived;
+            const old_derived_used = current_derived_used;
+            current_derived = weak;
+            try {
+                current_derived_used = null;
+                affector(obj);
+                if (!current_derived_used) clearAffector(obj);
+            } finally {
+                current_derived = old_derived;
+                current_derived_used = old_derived_used;
             }
         }
+    }[name];
+    Object.defineProperty(obj, "name", { value: name });
+    Object.defineProperty(obj, sym_pideps, { value: new Map() });
+    Object.defineProperty(obj, sym_weak, { value: weak });
+    Object.defineProperty(obj, sym_affect, { value: affect });
+    Object.defineProperty(obj, sym_affect_task, { writable: true, value: null });
+
+    const old_derived = current_derived;
+    const old_derived_used = current_derived_used;
+    current_derived = weak;
+    try {
+        current_derived_used = false;
+        affector(obj);
+        if (!current_derived_used) clearAffector(obj);
+    } finally {
+        current_derived = old_derived;
+        current_derived_used = old_derived_used;
     }
+    return obj;
 }
 
-defineProperties(affect, { clear: clearAffect });
+function clearAffector(affector) {
+    affector[sym_affect_task] = undefined;
+    affector[sym_pideps].clear();
+    const refs = affector[sym_affect_refs];
+    if (refs) {
+        for (const i of refs) {
+            /** @type {Set | undefined} */
+            const set = affectFunctionsWeakRefs.get(i);
+            if (set && set.delete(affector) && set.size == 0) {
+                affectFunctionsWeakRefs.delete(i);
+            }
+        }
+        refs.clear();
+    } else {
+        affectFunctionsRefs.delete(affector);
+    }
+}
 
 //#endregion
 //#region invalidation
 
 /** @param {Derived} target @param {boolean} [transitive] */
 function invalidateDerivation(target, transitive) {
-    const affect_task = target[sym_affect_task];
-    if (affect_task !== undefined) {
+    if (sym_affect_task in target) {
+        const affect_task = target[sym_affect_task];
         if (affect_task === null) {
             target[sym_affect_task] = !!transitive;
             queueMicrotask(target[sym_affect]);
@@ -1722,4 +1764,5 @@ module.exports = {
     __proto__: null,
     Derived,
     State,
+    Affector,
 };
