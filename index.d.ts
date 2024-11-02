@@ -280,7 +280,6 @@ export const State: {
          */
         use(target: object): void;
         prototype: Object;
-        [Symbol.hasInstance](): boolean;
     };
     /** **Summary**: an array that is tracked, changes to it can be noticed by derivations that use it
      *
@@ -301,7 +300,6 @@ export const State: {
          */
         use(target: unknown[]): void;
         readonly prototype: any[];
-        [Symbol.hasInstance](): boolean;
     };
 };
 export namespace State {
