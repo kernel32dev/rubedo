@@ -771,12 +771,13 @@ function track(value) {
                     enumerable: descriptor.enumerable,
                     configurable: true,
                 });
+            } else {
+                // since writable and configurable is false, we can't update the property,
+                // we can however change the way it is obtained through the proxy to return the correct tracked valued
+                // hence we would need a call to the track function in the property getter
+                // however, that might be too much of a performance hit, for such a small edge case (string-keyed data properties frozen before the call to track), so we are not doing that for now
+                console.warn(`State.track: Could not wrap with tracking the property with key ${key} of object, because it is not configurable nor writable`);
             }
-            // since writable and configurable is false, we can't update the property,
-            // we can however change the way it is obtained through the proxy to return the correct tracked valued
-            // hence we would need a call to the track function in the property getter
-            // however, that might be too much of a performance hit, for such a small edge case (string-keyed data properties frozen before the call to track), so we are not doing that for now
-            console.warn(`State.track: Could not wrap with tracking the property with key ${key} of object, because it is not configurable nor writable`);
         }
         return proxy;
     } else if (proto == Array.prototype && Array.isArray(value)) {
@@ -797,12 +798,13 @@ function track(value) {
                     enumerable: descriptor.enumerable,
                     configurable: true,
                 });
+            } else {
+                // since writable and configurable is false, we can't update the property,
+                // we can however change the way it is obtained through the proxy to return the correct tracked valued
+                // hence we would need a call to the track function in the property getter
+                // however, that might be too much of a performance hit, for such a small edge case (string-keyed data properties frozen before the call to track), so we are not doing that for now
+                console.warn(`State.track: Could not wrap with tracking the item at index ${key} of array, because it is not configurable nor writable`);
             }
-            // since writable and configurable is false, we can't update the property,
-            // we can however change the way it is obtained through the proxy to return the correct tracked valued
-            // hence we would need a call to the track function in the property getter
-            // however, that might be too much of a performance hit, for such a small edge case (string-keyed data properties frozen before the call to track), so we are not doing that for now
-            console.warn(`State.track: Could not wrap with tracking the item at index ${key} of array, because it is not configurable nor writable`);
         }
         return createStateArray(value, StateArrayPrototype);
     } else if (value instanceof Promise) {
@@ -861,10 +863,11 @@ function freeze(value) {
                     enumerable: descriptor.enumerable,
                     configurable: true,
                 });
+            } else {
+                // since writable and configurable is false, we can't update the property,
+                // we can't even change the way it is obtained through the proxy to return the correct tracked valued, because there is no proxy for frozen objects
+                console.warn(`State.freeze: Could not wrap with tracking the property with key ${key} of object, because it is not configurable nor writable`);
             }
-            // since writable and configurable is false, we can't update the property,
-            // we can't even change the way it is obtained through the proxy to return the correct tracked valued, because there is no proxy for frozen objects
-            console.warn(`State.freeze: Could not wrap with tracking the property with key ${key} of object, because it is not configurable nor writable`);
         }
         return Object.freeze(value);
     } else if (proto == Array.prototype && Array.isArray(value)) {
@@ -885,10 +888,11 @@ function freeze(value) {
                     enumerable: descriptor.enumerable,
                     configurable: true,
                 });
+            } else {
+                // since writable and configurable is false, we can't update the property,
+                // we can't even change the way it is obtained through the proxy to return the correct tracked valued, because there is no proxy for frozen objects
+                console.warn(`State.freeze: Could not wrap with tracking the item at index ${key} of array, because it is not configurable nor writable`);
             }
-            // since writable and configurable is false, we can't update the property,
-            // we can't even change the way it is obtained through the proxy to return the correct tracked valued, because there is no proxy for frozen objects
-            console.warn(`State.freeze: Could not wrap with tracking the item at index ${key} of array, because it is not configurable nor writable`);
         }
         return Object.freeze(value);
     } else if (value instanceof Promise) {
