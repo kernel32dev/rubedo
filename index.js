@@ -94,7 +94,7 @@ const sym_affect_task = Symbol("affect_task");
 
 /** this symbol is present on active affector functions
  *
- * this contains a function that must be called whenever a dependency of the derivation possibly changes
+ * this contains a function that is not called whenever a dependency of the derivation possibly changes
  */
 const sym_affect = Symbol("affect");
 
@@ -316,7 +316,7 @@ function Derived(name, derivator) {
             }
         }
     })[name];
-    Object.setPrototypeOf(Derived, typeof new.target.prototype == "object" ? new.target.prototype : DerivedPrototype);
+    Object.setPrototypeOf(Derived, new.target.prototype);
     Object.defineProperty(Derived, sym_ders, { value: new Set() });
     Object.defineProperty(Derived, sym_pideps, { value: new Map() });
     Object.defineProperty(Derived, sym_weak, { writable: true, value: null });
@@ -366,7 +366,7 @@ Object.defineProperty(Derived, "debugLogWeakRefCleanUp", {
             if (debugRegistry) debugRegistry = null;
             return;
         }
-        if (typeof logger != "function") throw new TypeError("logger must be a function");
+        if (typeof logger != "function") throw new TypeError("logger is not a function");
         debugWeakRefLogger = logger;
         if (!debugRegistry) {
             const regex = new RegExp("^Error: ");
@@ -473,7 +473,7 @@ function State(name, value) {
             return State[sym_value];
         }
     })[name];
-    Object.setPrototypeOf(State, typeof new.target.prototype == "object" ? new.target.prototype : StatePrototype);
+    Object.setPrototypeOf(State, new.target.prototype);
     Object.defineProperty(State, sym_ders, { value: new Set() });
     State[sym_value] = track(value);
     return State;
@@ -489,7 +489,7 @@ defineProperties(State, {
         } else {
             name = "" + name;
         }
-        if (!target || (typeof target != "object" && typeof target != "function")) throw new TypeError("the target must be an object");
+        if (!target || (typeof target != "object" && typeof target != "function")) throw new TypeError("the target is not an object");
         if (typeof key != "string" && typeof key != "number" && typeof key != "symbol") throw new TypeError("State.view can't use a value of type " + typeof key + " as a key");
         const State = ({
             [name]() {
@@ -525,6 +525,8 @@ defineProperties(State, {
     is,
     Object: StateObject,
     Array: StateArray,
+    Map: StateMap,
+    Set: StateSet,
 })
 
 State.prototype = StatePrototype;
@@ -575,7 +577,7 @@ function Effect() {
         i = 1;
         name = arguments[0];
     }
-    const affector = createAffector(name, arguments[arguments.length - 1], typeof new.target.prototype == "object" ? new.target.prototype : AffectorPrototype);
+    const affector = createAffector(name, arguments[arguments.length - 1], new.target.prototype);
     if (affector[sym_affect_task] !== undefined) {
         const refs = new Set();
         Object.defineProperty(affector, sym_affect_refs, { value: refs });
@@ -597,7 +599,7 @@ defineProperties(Effect, {
             affector = name;
             name = "";
         }
-        affector = createAffector(name, affector, typeof new.target.prototype == "object" ? new.target.prototype : AffectorPrototype);
+        affector = createAffector(name, affector, new.target.prototype);
         if (affector[sym_affect_task] !== undefined) affectFunctionsRefs.add(affector);
         return affector;
     },
@@ -607,7 +609,7 @@ defineProperties(Effect, {
             affector = name;
             name = "";
         }
-        return createAffector(name, affector, typeof new.target.prototype == "object" ? new.target.prototype : AffectorPrototype);
+        return createAffector(name, affector, new.target.prototype);
     },
 });
 
@@ -754,7 +756,13 @@ function track(value) {
     if (sym_tracked in value) return value[sym_tracked];
     const proto = Object.getPrototypeOf(value);
     if (!proto || proto == Object.prototype) {
-        if (!Object.isExtensible(value)) trackNonExtensibleError();
+        if (!Object.isExtensible(value)) {
+            if (Object.isFrozen(value)) {
+                // TODO! do something about properties that need tracking (warning maybe?)
+                return value;
+            }
+            trackNonExtensibleError();
+        }
         const proxy = new Proxy(value, StateObjectProxyHandler);
         Object.defineProperty(value, sym_ders, { value: { __proto__: null } });
         Object.defineProperty(value, sym_tracked, { value: proxy });
@@ -764,7 +772,7 @@ function track(value) {
             if (!("value" in descriptor)) continue;
             const old_prop_value = descriptor.value;
             const new_prop_value = track(old_prop_value);
-            if (new_prop_value === old_prop_value) continue;
+            if (new_prop_value == old_prop_value) continue;
             if (descriptor.writable) {
                 value[key] = new_prop_value;
             } else if (descriptor.configurable) {
@@ -784,14 +792,20 @@ function track(value) {
         }
         return proxy;
     } else if (proto == Array.prototype && Array.isArray(value)) {
-        if (!Object.isExtensible(value)) trackNonExtensibleError();
+        if (!Object.isExtensible(value)) {
+            if (Object.isFrozen(value)) {
+                // TODO! do something about properties that need tracking (warning maybe?)
+                return value;
+            }
+            trackNonExtensibleError();
+        }
         const descriptors = Object.getOwnPropertyDescriptors(value);
         for (let key = 0; key < value.length; key++) {
             const descriptor = descriptors[key];
             if (!("value" in descriptor)) continue;
             const old_prop_value = descriptor.value;
             const new_prop_value = track(old_prop_value);
-            if (new_prop_value === old_prop_value) continue;
+            if (new_prop_value == old_prop_value) continue;
             if (descriptor.writable) {
                 value[key] = new_prop_value;
             } else if (descriptor.configurable) {
@@ -831,6 +845,24 @@ function track(value) {
                 invalidateDerivationSet(ders);
             },
         );
+    } else if (proto == Map.prototype) {
+        if (!Object.isExtensible(value)) trackNonExtensibleError();
+        for (const key of value.keys()) {
+            const old_value = value.get(key);
+            const new_value = track(old_value);
+            if (old_value != new_value) value.set(key, new_value);
+        }
+        Object.setPrototypeOf(value, StateMapPrototype);
+        Object.defineProperty(value, sym_ders, { value: new Map() });
+        Object.defineProperty(value, sym_len, { value: new Set() });
+        Object.defineProperty(value, sym_all, { value: new Set() });
+        Object.defineProperty(value, sym_tracked, { value });
+    } else if (proto == Set.prototype) {
+        if (!Object.isExtensible(value)) trackNonExtensibleError();
+        Object.setPrototypeOf(value, StateSetPrototype);
+        Object.defineProperty(value, sym_ders, { value: new Map() });
+        Object.defineProperty(value, sym_all, { value: new Set() });
+        Object.defineProperty(value, sym_tracked, { value });
     }
     return value;
 }
@@ -847,7 +879,13 @@ function freeze(value) {
     if (sym_tracked in value) return value[sym_tracked];
     const proto = Object.getPrototypeOf(value);
     if (!proto || proto == Object.prototype) {
-        if (!Object.isExtensible(value)) trackNonExtensibleError();
+        if (!Object.isExtensible(value)) {
+            if (Object.isFrozen(value)) {
+                // TODO! do something about properties that need tracking (warning maybe?)
+                return value;
+            }
+            trackNonExtensibleError();
+        }
         Object.defineProperty(value, sym_ders, { value: { __proto__: null } });
         Object.defineProperty(value, sym_tracked, { value: value });
         const descriptors = Object.getOwnPropertyDescriptors(value);
@@ -856,7 +894,7 @@ function freeze(value) {
             if (!("value" in descriptor)) continue;
             const old_prop_value = descriptor.value;
             const new_prop_value = track(old_prop_value);
-            if (new_prop_value === old_prop_value) continue;
+            if (new_prop_value == old_prop_value) continue;
             if (descriptor.writable) {
                 value[key] = new_prop_value;
             } else if (descriptor.configurable) {
@@ -874,14 +912,20 @@ function freeze(value) {
         }
         return Object.freeze(value);
     } else if (proto == Array.prototype && Array.isArray(value)) {
-        if (!Object.isExtensible(value)) trackNonExtensibleError();
+        if (!Object.isExtensible(value)) {
+            if (Object.isFrozen(value)) {
+                // TODO! do something about properties that need tracking (warning maybe?)
+                return value;
+            }
+            trackNonExtensibleError();
+        }
         const descriptors = Object.getOwnPropertyDescriptors(value);
         for (let key = 0; key < value.length; key++) {
             const descriptor = descriptors[key];
             if (!("value" in descriptor)) continue;
             const old_prop_value = descriptor.value;
             const new_prop_value = track(old_prop_value);
-            if (new_prop_value === old_prop_value) continue;
+            if (new_prop_value == old_prop_value) continue;
             if (descriptor.writable) {
                 value[key] = new_prop_value;
             } else if (descriptor.configurable) {
@@ -920,6 +964,24 @@ function freeze(value) {
             },
         );
         return value;
+    } else if (proto == Map.prototype) {
+        if (!Object.isExtensible(value)) trackNonExtensibleError();
+        for (const key of value.keys()) {
+            const old_value = value.get(key);
+            const new_value = track(old_value);
+            if (old_value != new_value) value.set(key, new_value);
+        }
+        Object.setPrototypeOf(value, StateMapPrototype);
+        Object.defineProperty(value, sym_ders, { value: new Map() });
+        Object.defineProperty(value, sym_len, { value: new Set() });
+        Object.defineProperty(value, sym_all, { value: new Set() });
+        Object.defineProperty(value, sym_tracked, { value });
+    } else if (proto == Set.prototype) {
+        if (!Object.isExtensible(value)) trackNonExtensibleError();
+        Object.setPrototypeOf(value, StateSetPrototype);
+        Object.defineProperty(value, sym_ders, { value: new Map() });
+        Object.defineProperty(value, sym_all, { value: new Set() });
+        Object.defineProperty(value, sym_tracked, { value });
     }
     return Object.freeze(value);
 }
@@ -1009,7 +1071,7 @@ defineProperties(StateObject, {
         return target && typeof target == "object" && sym_tracked in target;
     },
     use(target) {
-        if (!target || typeof target !== "object") throw new TypeError("target must be an object");
+        if (!target || typeof target !== "object") throw new TypeError("target is not an Object");
         if (!current_derived) return;
         const ders = target[sym_ders];
         if (!ders) return;
@@ -1200,7 +1262,7 @@ defineProperties(StateArray, {
         return Array.isArray(target) && sym_tracked in target;
     },
     use(target) {
-        if (!target || typeof target !== "object" || !Array.isArray(target)) throw new TypeError("target must be an array");
+        if (!target || typeof target !== "object" || !Array.isArray(target)) throw new TypeError("target is not an Array");
         if (!current_derived || !(sym_len in target)) return;
         while (sym_src in target) target = target[sym_src];
         target[sym_all].add(current_derived);
@@ -1781,6 +1843,274 @@ function as_length(key) {
     return undefined;
 }
 //#endregion
+
+//#endregion
+//#region map
+
+const nativeMapSizeGetter = Object.getOwnPropertyDescriptor(Map.prototype, "size").get;
+
+const StateMapPrototype = defineProperties({ __proto__: Map.prototype }, {
+    // read-one
+    get(key) {
+        /** @type {Map<any, Set<WeakRef<Derived>>>} */
+        const ders = this[sym_ders];
+        if (current_derived) {
+            let der_set = ders.get(key);
+            if (!der_set) ders.set(key, der_set = new Set());
+            der_set.add(current_derived);
+            current_derived_used = true;
+        }
+        return Map.prototype.get.apply(this, arguments);
+    },
+    has(key) {
+        // TODO! split sym_ders into two to track presence of key and value of key separately
+        /** @type {Map<any, Set<WeakRef<Derived>>>} */
+        const ders = this[sym_ders];
+        if (current_derived) {
+            let der_set = ders.get(key);
+            if (!der_set) ders.set(key, der_set = new Set());
+            der_set.add(current_derived);
+            current_derived_used = true;
+        }
+        return Map.prototype.has.apply(this, arguments);
+    },
+    // read-all
+    entries() {
+        if (current_derived) {
+            this[sym_all].add(current_derived);
+            current_derived_used = true;
+        }
+        return Map.prototype.entries.apply(this, arguments);
+    },
+    values() {
+        if (current_derived) {
+            this[sym_all].add(current_derived);
+            current_derived_used = true;
+        }
+        return Map.prototype.values.apply(this, arguments);
+    },
+    keys() {
+        if (current_derived) {
+            this[sym_all].add(current_derived);
+            current_derived_used = true;
+        }
+        return Map.prototype.keys.apply(this, arguments);
+    },
+    forEach() {
+        if (current_derived) {
+            this[sym_all].add(current_derived);
+            current_derived_used = true;
+        }
+        return Map.prototype.forEach.apply(this, arguments);
+    },
+    // write-one
+    set(key, value) {
+        if (value === undefined) {
+            if (Map.prototype.has.call(this, key) && Map.prototype.get.call(this, key) === undefined) {
+                return this;
+            }
+        } else {
+            value = track(value);
+            if (is(value, Map.prototype.get.call(this, key))) return this;
+        }
+        const ders_set = this[sym_ders].get(key);
+        if (ders_set) {
+            this[sym_ders].delete(key);
+            invalidateDerivationSet(ders_set);
+        }
+        invalidateDerivationSet(this[sym_len]);
+        invalidateDerivationSet(this[sym_all]);
+        Map.prototype.set.call(this, key, value);
+        return this;
+    },
+    delete(key) {
+        if (Map.prototype.delete.call(this, key)) {
+            const ders_set = this[sym_ders].get(key);
+            if (ders_set) {
+                this[sym_ders].delete(key);
+                invalidateDerivationSet(ders_set);
+            }
+            invalidateDerivationSet(this[sym_len]);
+            invalidateDerivationSet(this[sym_all]);
+            return true;
+        }
+        return false;
+    },
+    // write-all
+    clear() {
+        if (!nativeMapSizeGetter.call(this)) return;
+        /** @type {Set<WeakRef<Derived>>[]} */
+        const ders = Array.from(this[sym_ders].values());
+        this[sym_ders].clear();
+        invalidateDerivationList(ders);
+        invalidateDerivationSet(this[sym_len]);
+        invalidateDerivationSet(this[sym_all]);
+        Map.prototype.clear.call(this);
+    },
+});
+
+Object.defineProperty(StateMapPrototype, "size", {
+    get() {
+        if (current_derived) {
+            this[sym_len].add(current_derived);
+            current_derived_used = true;
+        }
+        return nativeMapSizeGetter.call(this);
+    },
+    enumerable: false,
+    configurable: true,
+});
+
+function StateMap(iterable) {
+    if (!new.target) throw new TypeError("Constructor StateMap requires 'new'");
+    if (iterable != null && iterable != undefined) {
+        const value = new Map(iterable);
+        Object.setPrototypeOf(value, new.target.prototype);
+        Object.defineProperty(value, sym_ders, { value: new Map() });
+        Object.defineProperty(value, sym_len, { value: new Set() });
+        Object.defineProperty(value, sym_all, { value: new Set() });
+        Object.defineProperty(value, sym_tracked, { value });
+        return value;
+    }
+}
+
+StateMap.prototype = StateMapPrototype;
+
+defineProperties(StateMap, {
+    use(target) {
+        if (!(target instanceof Map)) throw new TypeError("target is not a Map");
+        if (current_derived) {
+            const all = target[sym_all];
+            if (all) {
+                all.add(current_derived);
+                current_derived_used = true;
+            }
+        }
+    },
+});
+
+//#endregion
+//#region set
+
+const nativeSetSizeGetter = Object.getOwnPropertyDescriptor(Set.prototype, "size").get;
+
+const StateSetPrototype = defineProperties({ __proto__: Set.prototype }, {
+    // read-one
+    has(value) {
+        /** @type {Map<any, Set<WeakRef<Derived>>>} */
+        const ders = this[sym_ders];
+        if (current_derived) {
+            let der_set = ders.get(value);
+            if (!der_set) ders.set(value, der_set = new Set());
+            der_set.add(current_derived);
+            current_derived_used = true;
+        }
+        return Set.prototype.has.call(this, value);
+    },
+    // read-all
+    entries() {
+        if (current_derived) {
+            this[sym_all].add(current_derived);
+            current_derived_used = true;
+        }
+        return Set.prototype.entries.call(this);
+    },
+    values() {
+        if (current_derived) {
+            this[sym_all].add(current_derived);
+            current_derived_used = true;
+        }
+        return Set.prototype.values.call(this);
+    },
+    keys() {
+        if (current_derived) {
+            this[sym_all].add(current_derived);
+            current_derived_used = true;
+        }
+        return Set.prototype.keys.call(this);
+    },
+    forEach() {
+        if (current_derived) {
+            this[sym_all].add(current_derived);
+            current_derived_used = true;
+        }
+        return Set.prototype.forEach.apply(this, arguments);
+    },
+    // write-one
+    add(value) {
+        if (!Set.prototype.has.call(this, value)) {
+            const ders_set = this[sym_ders].get(value);
+            if (ders_set) {
+                this[sym_ders].delete(value);
+                invalidateDerivationSet(ders_set);
+            }
+            invalidateDerivationSet(this[sym_all]);
+            Set.prototype.add.call(this, value);
+        }
+        return this;
+    },
+    delete(value) {
+        if (Set.prototype.delete.call(this, value)) {
+            const ders_set = this[sym_ders].get(value);
+            if (ders_set) {
+                this[sym_ders].delete(value);
+                invalidateDerivationSet(ders_set);
+            }
+            invalidateDerivationSet(this[sym_all]);
+            return true;
+        }
+        return false;
+    },
+    // write-all
+    clear() {
+        if (!nativeSetSizeGetter.call(this)) return;
+        /** @type {Set<WeakRef<Derived>>[]} */
+        const ders = Array.from(this[sym_ders].values());
+        this[sym_ders].clear();
+        invalidateDerivationList(ders);
+        invalidateDerivationSet(this[sym_all]);
+        Set.prototype.clear.call(this);
+    },
+});
+
+Object.defineProperty(StateSetPrototype, "size", {
+    get() {
+        if (current_derived) {
+            this[sym_all].add(current_derived);
+            current_derived_used = true;
+        }
+        return nativeSetSizeGetter.call(this);
+    },
+    enumerable: false,
+    configurable: true,
+});
+
+function StateSet(iterable) {
+    if (!new.target) throw new TypeError("Constructor StateSet requires 'new'");
+    if (iterable != null && iterable != undefined) {
+        const value = new Set(iterable);
+        Object.setPrototypeOf(value, new.target.prototype);
+        Object.defineProperty(value, sym_ders, { value: new Set() });
+        Object.defineProperty(value, sym_all, { value: new Set() });
+        Object.defineProperty(value, sym_tracked, { value });
+        return value;
+    }
+}
+
+StateSet.prototype = StateSetPrototype;
+
+defineProperties(StateSet, {
+    use(target) {
+        if (!(target instanceof Set)) throw new TypeError("target is not a Set");
+        if (current_derived) {
+            const all = target[sym_all];
+            if (all) {
+                all.add(current_derived);
+                current_derived_used = true;
+            }
+        }
+    },
+});
 
 //#endregion
 //#region array extensions

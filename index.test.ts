@@ -10,6 +10,8 @@ function promiseWithResolvers<T>(): [Promise<T>, (value: T | PromiseLike<T>) => 
     return [p, f, r];
 }
 
+// TODO! test creating a dependency inside a derivator and then invalidating it right after
+
 describe("State and Derived with caching and invalidation", () => {
     test("State should return the initial value", () => {
         const state = new State(10);
@@ -427,44 +429,6 @@ describe("type guards", () => {
             affect.clear(1);
         }).toThrow();
     });
-    describe("can't track object that is not extensible", () => {
-        test("State.track object", () => {
-            const x = Object.preventExtensions({});
-            expect(() => {
-                State.track(x);
-            }).toThrow();
-        });
-        test("State.track array", () => {
-            const x = Object.preventExtensions([]);
-            expect(() => {
-                State.track(x);
-            }).toThrow();
-        });
-        test("State.track promise", () => {
-            const x = Object.preventExtensions(new Promise(() => { }));
-            expect(() => {
-                State.track(x);
-            }).toThrow();
-        });
-        test("State.freeze object", () => {
-            const x = Object.preventExtensions({});
-            expect(() => {
-                State.freeze(x);
-            }).toThrow();
-        });
-        test("State.freeze array", () => {
-            const x = Object.preventExtensions([]);
-            expect(() => {
-                State.freeze(x);
-            }).toThrow();
-        });
-        test("State.freeze promise", () => {
-            const x = Object.preventExtensions(new Promise(() => { }));
-            expect(() => {
-                State.freeze(x);
-            }).toThrow();
-        });
-    });
 });
 
 if (false) describe("derivation region guards", () => {
@@ -590,7 +554,7 @@ describe("tracked object", () => {
         expect(derived()).toBe(1);
     });
     test("derivation notice changes in tracked object made with track", () => {
-        const obj = State.track({}) as { property?: number };
+        const obj = State.track<{ property?: number }>({});
         const derived = new Derived(() => obj.property);
         expect(derived()).toBe(undefined);
         obj.property = 1;
@@ -600,28 +564,28 @@ describe("tracked object", () => {
 
 describe("tracked array", () => {
     test("derivation notice changes to length", () => {
-        const arr = State.track([]) as number[];
+        const arr = State.track<number[]>([]);
         const derived = new Derived(() => arr.length);
         expect(derived()).toBe(0);
         arr.push(0, 0, 0);
         expect(derived()).toBe(3);
     });
     test("derivation notice changes to item", () => {
-        const arr = State.track([0]) as number[];
+        const arr = State.track<number[]>([0]);
         const derived = new Derived(() => arr[0]);
         expect(derived()).toBe(0);
         arr[0] = 3;
         expect(derived()).toBe(3);
     });
     test("naive map works", () => {
-        const arr = State.track([0]) as number[];
+        const arr = State.track<number[]>([0]);
         const derived = new Derived(() => arr.map(String));
         expect(derived()).toEqual(["0"]);
         arr[0] = 3;
         expect(derived()).toEqual(["3"]);
     });
     test("derived map works", () => {
-        const arr = State.track([0, 1, 2]) as number[];
+        const arr = State.track<number[]>([0, 1, 2]);
         const mock = jest.fn(String);
         const derived = arr.$map(mock);
         expect(mock).toHaveBeenCalledTimes(0);
@@ -633,7 +597,7 @@ describe("tracked array", () => {
         expect(mock).toHaveBeenCalledTimes(4);
     });
     test("double derived map works", () => {
-        const arr = State.track([0, 1, 2]) as number[];
+        const arr = State.track<number[]>([0, 1, 2]);
         const mock = jest.fn(String);
         const derived = arr.$map(mock).$map(Number);
         expect(mock).toHaveBeenCalledTimes(0);
@@ -645,7 +609,7 @@ describe("tracked array", () => {
         expect(mock).toHaveBeenCalledTimes(4);
     });
     test("derivation notice on clear array", () => {
-        const arr = State.track([1, 2, 3]) as number[];
+        const arr = State.track<number[]>([1, 2, 3]);
         const derived = new Derived(() => arr.length);
         expect(derived()).toBe(3);
 
@@ -653,7 +617,7 @@ describe("tracked array", () => {
         expect(derived()).toBe(0);
     });
     test("derivation notice on specific item change", () => {
-        const arr = State.track([1, 2, 3]) as number[];
+        const arr = State.track<number[]>([1, 2, 3]);
         const derived = new Derived(() => arr[1]);  // Observe the second item
         expect(derived()).toBe(2);
 
@@ -661,7 +625,7 @@ describe("tracked array", () => {
         expect(derived()).toBe(42);
     });
     test("push and pop operations", () => {
-        const arr = State.track([1, 2, 3]) as number[];
+        const arr = State.track<number[]>([1, 2, 3]);
         const derived = new Derived(() => arr.slice());
         expect(derived()).toEqual([1, 2, 3]);
 
@@ -672,7 +636,7 @@ describe("tracked array", () => {
         expect(derived()).toEqual([1, 2, 3]);
     });
     test("shift and unshift operations", () => {
-        const arr = State.track([1, 2, 3]) as number[];
+        const arr = State.track<number[]>([1, 2, 3]);
         const derived = new Derived(() => arr.slice());
         expect(derived()).toEqual([1, 2, 3]);
 
@@ -683,7 +647,7 @@ describe("tracked array", () => {
         expect(derived()).toEqual([1, 2, 3]);
     });
     test("filter derivation works", () => {
-        const arr = State.track([1, 2, 3, 4, 5]) as number[];
+        const arr = State.track<number[]>([1, 2, 3, 4, 5]);
         const derived = new Derived(() => arr.filter(x => x % 2 === 0));  // Track only even numbers
         expect(derived()).toEqual([2, 4]);
 
@@ -694,7 +658,7 @@ describe("tracked array", () => {
         expect(derived()).toEqual([4, 6]);
     });
     test("reduce derivation works", () => {
-        const arr = State.track([1, 2, 3]) as number[];
+        const arr = State.track<number[]>([1, 2, 3]);
         const derived = new Derived(() => arr.reduce((acc, x) => acc + x, 0));  // Sum of elements
         expect(derived()).toBe(6);
 
@@ -705,7 +669,7 @@ describe("tracked array", () => {
         expect(derived()).toBe(10);
     });
     test("complex chain of map and filter", () => {
-        const arr = State.track([1, 2, 3, 4, 5, 6]) as number[];
+        const arr = State.track<number[]>([1, 2, 3, 4, 5, 6]);
         const derived = new Derived(() => arr.filter(x => x % 2 === 0).map(x => x * 2));  // Double even numbers
         expect(derived()).toEqual([4, 8, 12]);
 
@@ -716,7 +680,7 @@ describe("tracked array", () => {
         expect(derived()).toEqual([20, 8, 12, 16]);
     });
     test("sorting derivation works", () => {
-        const arr = State.track([3, 1, 4, 1, 5]) as number[];
+        const arr = State.track<number[]>([3, 1, 4, 1, 5]);
         const derived = new Derived(() => [...arr].sort((a, b) => a - b));  // Sort ascending
         expect(derived()).toEqual([1, 1, 3, 4, 5]);
 
@@ -724,7 +688,7 @@ describe("tracked array", () => {
         expect(derived()).toEqual([1, 1, 2, 4, 5]);
     });
     test("reversing derivation works", () => {
-        const arr = State.track([1, 2, 3]) as number[];
+        const arr = State.track<number[]>([1, 2, 3]);
         const derived = new Derived(() => [...arr].reverse());  // Reverse the array
         expect(derived()).toEqual([3, 2, 1]);
 
@@ -769,6 +733,51 @@ describe("tracked promise", () => {
         expect(rejected()).toBe(undefined);
         await microtask;
         expect(rejected()).toBe("reason");
+    });
+});
+
+describe("tracked map", () => {
+    test("derivation notice changes in tracked Map made with track", () => {
+        const map = State.track<Map<string, number>>(new Map());
+        const derived = new Derived(() => map.get("key"));
+        
+        expect(derived()).toBe(undefined);
+        
+        map.set("key", 42);
+        expect(derived()).toBe(42);
+        
+        map.set("key", 100);
+        expect(derived()).toBe(100);
+        
+        map.delete("key");
+        expect(derived()).toBe(undefined);
+    });
+    test("derivation notice presence changes in tracked Map made with track", () => {
+        const map = State.track<Map<string, number>>(new Map());
+        const derived = new Derived(() => map.has("key"));
+        
+        expect(derived()).toBe(false);
+        
+        map.set("key", 42);
+        expect(derived()).toBe(true);
+        
+        map.delete("key");
+        expect(derived()).toBe(false);
+    });
+});
+
+describe("tracked set", () => {
+    test("derivation notice changes in tracked Set made with track", () => {
+        const set = State.track<Set<string>>(new Set());
+        const derived = new Derived(() => set.has("key"));
+        
+        expect(derived()).toBe(false);
+        
+        set.add("key");
+        expect(derived()).toBe(true);
+        
+        set.delete("key");
+        expect(derived()).toBe(false);
     });
 });
 

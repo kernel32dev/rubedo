@@ -161,8 +161,8 @@ export const State: {
      * 3. **TrackedObject and inheritors** (automatically tracked on constructor, only string properties)
      * 4. **plain arrays** (default array prototype and Array.isArray, only items and length)
      * 5. **TrackedArray and inheritors** (automatically tracked on constructor, only items and length)
-     * 6. **Map** (with default prototype, only keys, values and size) *TODO!*
-     * 7. **Set** (with default prototype, only items and size) *TODO!*
+     * 6. **Map** (with default prototype, only keys, values and size)
+     * 7. **Set** (with default prototype, only items and size)
      * 8. **Promise** (with default prototype, only the value or rejection of the promise)
      *
      * also note that some tracking requires wrapping the object in a proxy,
@@ -265,7 +265,7 @@ export const State: {
      *
      * you can inherit from this to allow your custom classes to have their properties tracked (custom classes are not tracked by default, see {@link State.track})
      *
-     * you can use `instanceof` to test if an object is tracked, `instanceof State.Object` also returns true for tracked arrays
+     * you can use `instanceof State.Object` to test if an object is tracked, it also returns true for all tracked objects (`State.Object`, `State.Array`, `State.Map`, `State.Set` and `State.Promise`)
      *
      * **Reference**: creates a new object with the correct prototype and already wrapped in a proxy
      */
@@ -285,7 +285,7 @@ export const State: {
      *
      * you can inherit from this to allow your custom classes to have their properties tracked (custom classes are not tracked by default, see {@link State.track})
      *
-     * you can use `instanceof` to test if an object is tracked, `instanceof State.Object` also returns true for tracked arrays
+     * you can use `instanceof State.Array` to test if an array is tracked, `instanceof State.Object` also returns true for tracked arrays
      *
      * **Reference**: creates a new array with the correct prototype and already wrapped in a proxy
      */
@@ -300,6 +300,44 @@ export const State: {
          */
         use(target: unknown[]): void;
         readonly prototype: any[];
+    };
+    /** **Summary**: a map that is tracked, changes to it can be noticed by derivations that use it
+     *
+     * you can inherit from this to allow your custom map classes to have their values tracked (custom classes are not tracked by default, see {@link State.track})
+     *
+     * you can use `instanceof State.Map` to test if a map is tracked, `instanceof State.Object` also returns true for tracked maps
+     *
+     * **Reference**: creates a new map with the correct prototype
+     */
+    Map: {
+        new <K, V>(iterable?: Iterable<readonly [K, V]> | null | undefined): Map<K, V>;
+        /** **Summary**: use the entire map, the current derivator will rerun if anything in the map changes
+         *
+         * this can be used as an optimization to avoid adding dependencies on each and every item individually by using `Derived.now` while still being correct
+         *
+         * **Reference**: adds a "all" dependency of this map to the current derivator, does nothing if target is not tracked or if no derivator is currently running
+         */
+        use(target: Map<unknown, unknown>): void;
+        readonly prototype: Map<any, any>;
+    };
+    /** **Summary**: a set that is tracked, changes to it can be noticed by derivations that use it
+     *
+     * you can inherit from this to allow your custom set classes to have their values tracked (custom classes are not tracked by default, see {@link State.track})
+     *
+     * you can use `instanceof State.Set` to test if an object is tracked, `instanceof State.Object` also returns true for tracked sets
+     *
+     * **Reference**: creates a new set with the correct prototype
+     */
+    Set: {
+        new <T>(iterable?: Iterable<T> | null | undefined): Set<T>;
+        /** **Summary**: use the entire set, the current derivator will rerun if anything in the set changes
+         *
+         * this can be used as an optimization to avoid adding dependencies on each and every item individually by using `Derived.now` while still being correct
+         *
+         * **Reference**: adds a "all" dependency of this set to the current derivator, does nothing if target is not tracked or if no derivator is currently running
+         */
+        use(target: Set<unknown>): void;
+        readonly prototype: Set<any>;
     };
 };
 export namespace State {
