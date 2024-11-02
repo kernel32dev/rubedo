@@ -1255,23 +1255,92 @@ const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
         const target = /** @type {StateArray} */ (this[sym_value]);
         if (!target.length) return;
         const result = Array.prototype.shift.call(target);
-        target[sym_ders].shift();
-        target[sym_slots].shift();
+        const last = target[sym_ders].pop();
+        const first = target[sym_slots].shift();
         invalidateDerivationList(target[sym_ders]);
+        invalidateDerivationSet(last);
+        invalidateDerivationSet(first);
         invalidateDerivationSet(target[sym_len]);
         invalidateDerivationSet(target[sym_all]);
         return result;
     },
     splice() {
-        throw new Error("TODO! StateArray.prototype.splice");
+        const target = /** @type {StateArray} */ (this[sym_value]);
+        const length = target.length;
+        if (arguments.length >= 2) {
+            for (let i = 2; i < arguments.length; i++) {
+                arguments[i] = track(arguments[i]);
+            }
+            const start = arguments[0] = normalize_start(arguments[0], length);
+            const deleteCount = arguments[1] = normalize_length(arguments[1], length - start);
+            const delta = arguments.length - deleteCount - 2;
+            const result = Array.prototype.splice.apply(target, arguments);
+            for (let i = start; i < start + deleteCount; i++) {
+                invalidateDerivationSet(target[sym_ders][i]);
+                invalidateDerivationSet(target[sym_slots][i]);
+                delete target[sym_slots][i];
+            }
+            if (delta != 0) {
+                for (let i = start + deleteCount; i < length; i++) {
+                    invalidateDerivationSet(target[sym_ders][i]);
+                }
+                target[sym_ders].length += delta;
+                if (delta > 0) {
+                    target[sym_slots].splice(start, start + deleteCount, ...Array(delta));
+                } else {
+                    target[sym_slots].splice(start, -delta);
+                }
+                invalidateDerivationSet(target[sym_len]);
+            }
+            invalidateDerivationSet(target[sym_all]);
+            return result;
+        } else if (arguments.length == 1) {
+            const start = arguments[0] = normalize_start(arguments[0], length);
+            if (start >= length) {
+                return Array.prototype.splice.call(target, start);
+            }
+            const ders = target[sym_ders].splice(new_length);
+            const slots = target[sym_slots].splice(new_length);
+            target.length = new_length;
+            const result = Array.prototype.splice.call(target, start);
+            invalidateDerivationList(ders);
+            invalidateDerivationList(slots);
+            invalidateDerivationSet(target[sym_len]);
+            invalidateDerivationSet(target[sym_all]);
+            return result;
+        }
+        return Array.prototype.splice.call(target);
     },
     sort(callback) {
-        throw new Error("TODO! StateArray.prototype.sort");
+        const target = /** @type {StateArray} */ (this[sym_value]);
+        const length = target.length;
+        if (length < 2) return this;
+        callback = callback || default_sort;
+        const map = Array(length);
+        for (let i = 0; i < length; i++) map[i] = i;
+        map.sort((a, b) => callback(target[a], target[b]));
+        let any = false;
+        for (let i = 0; i < length; i++) {
+            if (map[i] != i) {
+                any = true;
+                invalidateDerivationSet(target[sym_ders][i]);
+            }
+        }
+        if (any) {
+            const copy = Array.from(target);
+            const copy_slots = Array.from(target[sym_slots]);
+            for (let i = 0; i < length; i++) {
+                const ii = map[i];
+                target[i] = copy[ii];
+                target[sym_slots][i] = copy_slots[ii];
+            }
+            invalidateDerivationSet(target[sym_all]);
+        }
+        return this;
     },
     reverse() {
         const target = /** @type {StateArray} */ (this[sym_value]);
         Array.prototype.reverse.call(target);
-        target[sym_ders].reverse();
         target[sym_slots].reverse();
         invalidateDerivationList(target[sym_ders]);
         invalidateDerivationSet(target[sym_len]);
@@ -1279,10 +1348,34 @@ const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
         return this;
     },
     copyWithin(dest, src, src_end) {
-        throw new Error("TODO! StateArray.prototype.copyWithin");
+        const target = /** @type {StateArray} */ (this[sym_value]);
+        const length = target.length;
+        if (!length) return this;
+        dest = normalize_start(dest, length);
+        src = normalize_start(src, length);
+        if (dest == src) return this;
+        src_end = normalize_end(src_end, length);
+        let dest_end = dest + src_end - src;
+        dest_end = dest_end < length ? dest_end : length;
+        for (let i = dest; i < dest_end; i++) {
+            invalidateDerivationSet(target[sym_ders][i]);
+            invalidateDerivationSet(target[sym_slots][i]);
+            delete target[sym_slots][i];
+        }
+        return this;
     },
     fill(value, start, end) {
-        throw new Error("TODO! StateArray.prototype.fill");
+        const target = /** @type {StateArray} */ (this[sym_value]);
+        const length = target.length;
+        if (!length) return this;
+        start = normalize_start(start, length);
+        end = normalize_end(end, length);
+        for (let i = start; i < end; i++) {
+            invalidateDerivationSet(target[sym_ders][i]);
+            invalidateDerivationSet(target[sym_slots][i]);
+            delete target[sym_slots][i];
+        }
+        return this;
     },
 
     $map(derivator, thisArg) {
@@ -1406,11 +1499,9 @@ const StateArrayProxyHandler = {
                 invalidateDerivationSet(target[sym_all]);
                 return result;
             } else if (new_length < old_length) {
-                const ders = target[sym_ders].slice(new_length);
-                const slots = target[sym_slots].slice(new_length);
+                const ders = target[sym_ders].splice(new_length);
+                const slots = target[sym_slots].splice(new_length);
                 target.length = new_length;
-                target[sym_ders].length = new_length;
-                target[sym_slots].length = new_length;
                 const result = Reflect.set(target, p, newValue, target);
                 invalidateDerivationList(ders);
                 invalidateDerivationList(slots);
@@ -1637,14 +1728,14 @@ function derivedMapArrayGet(target, index) {
 
 //#region array helper functions
 function normalize_length(length, max) {
-    length = Math.floor(Number(length));
+    length = Math.trunc(+length);
     if (Number.isNaN(length)) return 0;
     if (length < 0) return 0;
     if (length > max) return max;
     return length;
 }
 function normalize_start(start, length) {
-    start = Math.floor(Number(start));
+    start = Math.trunc(+start);
     if (Number.isNaN(start)) return 0;
     if (start < 0) start += length;
     if (start < 0) return 0;
@@ -1652,7 +1743,7 @@ function normalize_start(start, length) {
     return start;
 }
 function normalize_end(end, length) {
-    end = Math.floor(Number(end));
+    end = Math.trunc(+end);
     if (Number.isNaN(end)) return 0;
     if (end < 0) end += length;
     if (end <= 0) return 0;
