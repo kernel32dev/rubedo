@@ -290,6 +290,7 @@ function Derived(name, derivator) {
                 // TODO! somehow ensure this can't cause an infinite recursive loop
                 const pideps = Derived[sym_pideps];
                 // TODO! since recreating the sym_ders link is only needed when revalidating due to an affect (not lazy), do this only when one is involved
+                // (referring to the second argument of the call below)
                 if (!possibleInvalidationIsInvalidated(pideps, old_weak)) {
                     return Derived[sym_value];
                 }
@@ -1612,6 +1613,9 @@ function DerivedMapArray(src, derivator, thisArg) {
     const value = Array();
     const proxy = new Proxy(value, DerivedMapArrayProxyHandler);
     Object.setPrototypeOf(value, DerivedArrayPrototype);
+    // TODO! this is wrong, because the mapper function is not pure
+    // to depend on a slot/prop of a derived mapped array is not to depend on the slot/prop of its source,
+    // since the mapper function may add its own dependencies
     Object.defineProperty(value, sym_ders, { value: src[sym_ders] });
     Object.defineProperty(value, sym_slots, { value: src[sym_slots] });
     Object.defineProperty(value, sym_len, { value: src[sym_len] });
@@ -1684,43 +1688,42 @@ const DerivedMapArrayProxyHandler = {
 /** @param {DerivedMapArray} target @param {number} index */
 function derivedMapArrayGet(target, index) {
     const src = target[sym_src];
-    const cache = target[sym_cache];
     const slots = src[sym_slots];
     if (index >= slots.length) {
         // the `target.length` produces the side effect of using the length,
         // and we just so happen to need to return undefined in this case
         return void src.length;
     }
-    let set = slots[index];
-    if (!set) slots[index] = set = new Set();
-    if (cache.has(set)) {
-        return cache.get(set)();
+    const tracked = target[sym_tracked];
+    const cache = target[sym_cache];
+    const ders = src[sym_ders];
+    let slot_set = slots[index];
+    if (!slot_set) slots[index] = slot_set = new Set();
+    let cached = cache.get(slot_set);
+    if (!cached) {
+        const derived_index = Object.setPrototypeOf(function DerivedIndex() {
+            const index = slots.indexOf(slot_set);
+            if (current_derived) {
+                // index should always be less than length, because the length of ders and slots should always be in sync
+                let der_set = ders[index];
+                if (!der_set) ders[index] = der_set = new Set();
+                der_set.add(current_derived);
+                current_derived_used = true;
+            }
+            return index;
+        }, DerivedPrototype);
+
+        const derived_slot = new Derived(() => {
+            const index = slots.indexOf(slot_set);
+            if (index != -1) {
+                slot_set.add(derived_slot[sym_weak]);
+                current_derived_used = true;
+                const value = Derived.now(() => src[index]);
+                return target[sym_derivator](value, derived_index, tracked);
+            }
+        });
+        cache.set(slot_set, cached = derived_slot);
     }
-    //const fixed_set = target[sym_ders][index];
-    //const derived_index = function DerivedIndex() {
-    //    if (current_derived) fixed_set.add(current_derived);
-    //    return index;
-    //};
-
-    // TODO! implement the index derived in the call to the mapper function below
-
-    // Derived.from
-    // const derived = function Derived() { return value; };
-    // Object.setPrototypeOf(derived, DerivedPrototype);
-    // Object.defineProperty(derived, sym_ders, { value: new Set() });
-    // Object.defineProperty(derived, sym_pideps, { value: new Map() });
-    // Object.defineProperty(derived, sym_weak, { value: new WeakRef(derived) });
-    // return derived;
-
-    const cached = new Derived(() => {
-        if (current_derived) {
-            set.add(current_derived);
-            current_derived_used = true;
-        }
-        // TODO! index
-        return target[sym_derivator](target[sym_src][index], Derived.from(NaN), target[sym_src][sym_tracked]);
-    });
-    cache.set(set, cached);
     return cached();
 }
 

@@ -432,7 +432,7 @@ declare global {
     interface Array<T> {
         /** creates a new mapped array, whose values are automatically kept up to date, by calling the function whenever dependencies change and are needed
          *
-         * the `$` indicates this is a special derived function that works with derived objects, and may not be exactly equivalent to their non deriving counterparts
+         * this is a special derived function that works with derived objects, and is not exactly equivalent to its non deriving counterpart
          *
          * attempting to mutate the resulting array directly will throw errors
          *
@@ -440,7 +440,7 @@ declare global {
          *
          * this call creates no dependencies on the current derivator
          *
-         * method added by leviathan-state
+         * the `$` indicates this is a method added by leviathan-state
          */
         $map<U>(derivator: (value: T, index: Derived<number>, array: T[]) => U): U[];
         $map<U, This>(derivator: (this: This, value: T, index: Derived<number>, array: T[]) => U, thisArg: This): U[];
@@ -456,7 +456,7 @@ declare global {
          *
          * however, because it notifies on change it is completely safe and correct to call this from derivations
          *
-         * method added by leviathan-state
+         * the `$` indicates this is a method added by leviathan-state
          */
         $resolved(): this is { $value: T };
         /** returns true if this promise is already rejected (has `$error`)
@@ -469,7 +469,7 @@ declare global {
          *
          * however, because it notifies on change it is completely safe and correct to call this from derivations
          *
-         * method added by leviathan-state
+         * the `$` indicates this is a method added by leviathan-state
          */
         $rejected(): this is { $value: undefined };
         /** returns the value, or undefined it this promise is not settled or was rejected
@@ -482,7 +482,7 @@ declare global {
          *
          * however, because it notifies on change it is completely safe and correct to use this from derivations
          *
-         * property added by leviathan-state
+         * the `$` indicates this is a property added by leviathan-state
          */
         readonly $value: T | undefined;
         /** returns the error, or undefined it this promise is not settled or was resolved
@@ -495,7 +495,7 @@ declare global {
          *
          * however, because it notifies on change it is completely safe and correct to use this from derivations
          *
-         * property added by leviathan-state
+         * the `$` indicates this is a property added by leviathan-state
          */
         readonly $error: unknown;
     }
