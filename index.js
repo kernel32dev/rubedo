@@ -29,11 +29,11 @@ const sym_len = Symbol("len");
 
 /** the invalidated and possibly invalidated dependencies of this object, present only on Derived objects
  *
- * having a non empty set on this value means this Derived is possibly invalidated, it is possibly invalidated if any of the deriveds in this set are invalidated
+ * having a non empty set on this value means this Derived is possibly invalidated, it is possibly invalidated if any of the derives in this set are invalidated
  *
  * this is always a `Map<WeakRef<Derived>, any>`
  *
- * the key is `WeakRef<Derived>` unlike sym_ders, it does not matter if it matches `.deref()[sym_weak]`, the point here is just to have a weak reference to the dependend object
+ * the key is `WeakRef<Derived>` unlike sym_ders, it does not matter if it matches `.deref()[sym_weak]`, the point here is just to have a weak reference to the dependent object
  *
  * the value refers to the value the derivation was last known as, because it may be reevaluated without our knowledge, so we must track it here, we can't track it on the remote derived
  *
@@ -103,7 +103,7 @@ const sym_affect_refs = Symbol("affect_refs");
 
 /** a symbol present on tracked objects, the value is itself after tracking
  *
- * used to reobtain the proxied version of an object to avoid unecessary creation of duplicate proxies
+ * used to reobtain the proxy-ed version of an object to avoid unnecessary creation of duplicate proxies
  */
 const sym_tracked = Symbol("tracked");
 
@@ -113,7 +113,7 @@ const sym_tracked = Symbol("tracked");
  */
 const sym_all = Symbol("all");
 
-/** exists on DerivedMapArray, the array from which the map occours */
+/** exists on DerivedMapArray, the array from which the map occurs */
 const sym_src = Symbol("src");
 
 /** exists on DerivedMapArray */
@@ -162,7 +162,7 @@ let current_derived = null;
  */
 let current_derived_used = true;
 
-/** this may be unecessary because circular derivation is already being detected, but i could not prove this
+/** this may be unnecessary because circular derivation is already being detected, but i could not prove this
  *
  * note that it is safe to use a WeakSet here because all values referenced in this set are on the stack
  */
@@ -191,11 +191,11 @@ const maximumFrozenComparisonsDepth = 10;
  * the comparator can't detect recursion before this runs out
  */
 let remainingFrozenComparisonsDepth = maximumFrozenComparisonsDepth;
-/** the set of frozen objects being used in a State.is after all remainingFrozenComparisonsDepth were exausted
+/** the set of frozen objects being used in a State.is after all remainingFrozenComparisonsDepth were exhausted
  *
  * note that it is safe to use a WeakSet here because all values referenced in this set are on the stack
  *
- * TODO! change this to a WeakMap<object, WeakSet<object>> to property track the pair of the comparison rather than just members
+ * TODO! change this to a WeakMap<object, WeakSet<object>> to properly track the pair of the comparison rather than just members
  */
 const recursiveFrozenComparisonGuard = new WeakSet();
 
@@ -1053,7 +1053,7 @@ const StateObjectProxyHandler = {
                 stateObjectUse(target, p);
             }
             // the line below fixes the problem outlined in the track function
-            // it is commentend out because it is called very often and may not justify the potential performance hit for fixing a very small edge case (string-keyed data properties frozen before the call to track)
+            // it is commented out because it is called very often and may not justify the potential performance hit for fixing a very small edge case (string-keyed data properties frozen before the call to track)
             //return track(Reflect.get(target, p, receiver));
         }
         return Reflect.get(target, p, receiver);

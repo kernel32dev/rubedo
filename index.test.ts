@@ -6,7 +6,7 @@ const microtask = Promise.resolve();
 function promiseWithResolvers<T>(): [Promise<T>, (value: T | PromiseLike<T>) => void, (error?: any) => void] {
     let f: (value: T | PromiseLike<T>) => void, r: (error?: any) => void;
     const p = new Promise<T>((resolve, reject) => { f = resolve; r = reject; });
-    if (!f! || !r!) throw new Error("Promise did not run handler syncronously");
+    if (!f! || !r!) throw new Error("Promise did not run handler synchronously");
     return [p, f, r];
 }
 
@@ -589,7 +589,7 @@ describe("tracked object", () => {
         obj.property = 1;
         expect(derived()).toBe(1);
     });
-    test("derivation notice changes in tracked object medwith track", () => {
+    test("derivation notice changes in tracked object made with track", () => {
         const obj = State.track({}) as { property?: number };
         const derived = new Derived(() => obj.property);
         expect(derived()).toBe(undefined);

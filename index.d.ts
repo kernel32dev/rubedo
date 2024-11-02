@@ -1,51 +1,64 @@
-// TODO! many descriptions in this file have multiple purposes:
-// 1. summary
-// 2. reference
-// 3. explaining the problem
-// 4. showing ideal usage
-// organize those descriptions and separate these components
-
-/** holds a value which is automatically updated once dependencies change
+/** **Summary**: create a new value from existing ones using a derivator function that is always up to date
  *
- * to read the value, call this object
+ * **Reference**:
  *
- * derived is updated lazily, once dependencies change, the derivator will only be executed again once the value is needed
+ * when constructed, the derivator is called synchronously and the return value is stored,
+ * all uses of {@link State.track tracked values} inside become dependencies of this derivation, and if any of them change this derivation will be invalidated
+ *
+ * when invalidated, calling the derived object will rerun (lazy evaluation)
+ *
+ * however, if this derivation was only invalidated by other derivations (transitive invalidation), when called,
+ * it will first check if the values of these derivations (possibly invalidated dependencies) have actually changed
+ * if none have changed, then a special case is triggered where the old value is revalidated without calling the derivator
+ *
+ * a value is considered changed according to the semantics of {@link State.is}
+ *
+ * if specified, the name is stored in the object
  */
 export interface Derived<out T> {
     (): T;
 
-    /** returns the current value, this call does not create dependencies
+    /** **Summary**: returns the current value, without creating dependencies
      *
      * if it is called inside a derived and this value changes the derived will **not** be invalidated
      */
     now(): T;
 
-    /** creates a new derivation using the derivator specified to transform the value */
+    /** **Summary**: derive a new value from this one in a more concise and readable manner
+     *
+     * `a.derive(x => f(x))` is equivalent to `new Derived(() => f(a()))`
+     */
     derive<U>(derivator: (value: T) => U): Derived<U>;
+
     /** the name specified when creating this object */
     readonly name: string;
 }
 export const Derived: {
-    /** creates a new derived, does not call the derivator immediatly, only calls it when needed,
-     *
-     * optionally you can pass a name for easier debugging, it will be available under the name property
-     */
     new <T>(derivator: () => T): Derived<T>;
     new <T>(name: string, derivator: () => T): Derived<T>;
     prototype: Derived<any>,
 
-    /** derives and obtains its current value, the dependencies are not tracked */
+    /** **Summary**: runs a block of code without creating dependencies
+     *
+     * this is useful when you have a block of code somewhere that tracks dependencies such as inside an affector
+     *
+     * but that code is only meant to run in response to something and therefore not actually meant to create the dependencies
+     */
     now<T>(derivator: () => T): T;
 
-    /** if value is a derivation, return it, otherwise, wrap it in a `Derived` that will never change
+    /** **Summary**: turns values that may or may not be wrapped in Derived into always wrapped in Derived
      *
      * useful to work with `T | Derived<T>` or `Derived.Or<T>` types
+     *
+     * **Reference**: if you pass an instance of `Derived`, return it, otherwise, wrap it in a `Derived` that will never change
      */
     from<T>(value: T | Derived<T>): Derived<T>;
 
-    /** returns value, but if you pass a derived or state, read its value
+    /** **Summary**: turns values that may or may not be wrapped in Derived into always plain values
      *
      * useful to work with `T | Derived<T>` or `Derived.Or<T>` types
+     *
+     * **Reference**: returns value, but if you pass an instance of `Derived`, call it
      */
     use<T>(value: T | Derived<T>): T;
 
@@ -53,45 +66,85 @@ export const Derived: {
     debugLogWeakRefCleanUp: ((message: string) => void) | null,
 };
 export namespace Derived {
-    /** a type alias to define that you expect a derivation that returns a `T`, but that a `T` is also accepted */
+    /** **Summary**: a type alias to define that you expect some `T` or a derivation that returns a `T`
+     *
+     * use this to express that somewhere accepts derived but also accepts just the plain values for convenience
+     *
+     * interfaces that use this alias should **not** check if the value is an instance of State to perform mutations on it
+     *
+     * this type has the semantics of not mutating the value
+     *
+     * although do note that it accepts the exact same values as `Derived.Or`, because `State` is a subtype of `Derived`
+     */
     type Or<T> = T | Derived<T>;
 }
 
-/** holds a value which can be changed with the set method
+/** **Summary**: hold a single mutable value
  *
  * this is the canonical way to represent a single value that can change, because leviathan can't track changes to local variables created with `let` and `var`
  *
  * the use of `let` and `var` can easily create bugs because of this,
  *
  * so always use `const` no matter what, and if you need mutability, create an instance of `State` instead
+ *
+ * so for example, if you just have an object that you need to share across many different places, it might be better to just call `State.track` and share a const reference to the object like this:
+ *
+ * ```
+ * const my_shared_state = State.track({
+ *     shared_property_one: "1",
+ *     shared_property_two: 2,
+ *     shared_property_three: true,
+ * });
+ * ```
+ *
+ * but let's say you that you this object to maybe be null, you can't just put it in a `let` since leviathan won't be able to track it, so instead you could use an instance of the `State` class
+ *
+ * ```
+ * const my_shared_state = new State<null | {
+ *     shared_property_one: string,
+ *     shared_property_two: number,
+ *     shared_property_three: boolean,
+ * }>(null);
+ * // later on in your code:
+ * my_shared_state.set({
+ *     shared_property_one: "1",
+ *     shared_property_two: 2,
+ *     shared_property_three: true,
+ * });
+ * ```
+ *
+ * to hold state you may not necessarily need instances of `State`, you can use tracked objects too, use the State class when you need to store a primitive value
  */
 export interface State<in out T> extends Derived<T> {
-    /** changes the value in state, and invalidates dependents if the new value is different from the current one */
-    set<U extends T>(value: U): void;
-    /** computes the new value based on the function, and invalidates dependents if the new value is different from the current one
+    /** **Summary**: changes the value in this state
      *
-     * this **can** be called anywhere, altough the old value is read, that read won't cause a dependency
+     * **Reference**: if the new value is different from the current one according to {@link State.is} equality, and invalidates dependents (not transitive invalidation)
      *
-     * note that if you need to do a change inside of the object,
-     * like changing a property of the object or changing values of the array,
-     * there is no need to call this function,
-     * just get the object and mutate it directly,
+     * note that this function is used to change the value, if what you want is to change something inside an object contained in this `State`, you don't use this method, instead you can just mutate it directly
+     *
      * don't clone the object unless necessary
      */
-    mut<U extends T>(transform: (value: T) => U): void;
+    set(value: T): void;
+    /** **Summary**: transforms the value in this state with a function
+     *
+     * does not create dependencies (even though the old value is technically read)
+     *
+     * **Reference**: read the value without creating dependencies, and passes it to the transform function, then sets it with the same semantics as the `set` method
+     *
+     * note that this function is used to change the value, if what you want is to change something inside an object contained in this `State`, you don't use this method, instead you can just mutate it directly
+     *
+     * don't clone the object unless necessary
+     */
+    mut(transform: (value: T) => T): void;
     /** the name specified when creating this object */
     readonly name: string;
 }
 export const State: {
-    /** creates a new state, with the value passed as the initial value,
-     *
-     * optionally you can pass a name for easier debugging, it will be available under the name property
-     */
     new <T>(value: T): State<T>;
     new <T>(name: string, value: T): State<T>;
     prototype: State<any>;
 
-    /** adds tracking to an object so leviathan can notice when it is read and written to
+    /** **Summary**: adds tracking to an object so leviathan can notice when it is read and written to
      *
      * leviathan can create dependency trees and update graphs without a compiler, but without a dedicated compilation step, it may need to give it a hand so it can do its job
      *
@@ -132,21 +185,19 @@ export const State: {
      */
     track<T>(value: T): T;
 
-    /** like `Object.freeze` but tracks items before freezing, allowing the object to be memoized
+    /** **Summary**: like `Object.freeze` but tracks items before freezing, allowing the object to be memoized
      *
      * this is useful to create "records" also known as "data objects", while also tracking the values inside
      *
      * that allows you to create a derivation that returns objects that can still be memoized
      *
-     * because without it you would be creating a new object everytime and everytime it would
+     * because without it you would be creating a new object every time, invalidating dependent derivations every time
      *
-     * note that you can also use `Object.freeze` to create data objects, but the properties won't be tracked
+     * note that you can also use `Object.freeze` to create data objects, but the properties won't be tracked (eg: wrapping objects and arrays in a proxy)
      *
      * frozen objects have special handling when being compared in leviathan
      *
      * frozen objects are compared equal to other frozen objects with the same string data properties and the same prototype, however the order can vary
-     *
-     * when comparing to check if the dependent derivations need to update
      *
      * does not freeze recursively, just like `Object.freeze`, but tracks recursively just like `State.track`
      *
@@ -154,17 +205,23 @@ export const State: {
      */
     freeze<T>(value: T): Readonly<T>;
 
-    /** returns true if two values are the same, but handles frozen objects in a special way
+    /** **Summary**: like `Object.is`, but uses structural equality for frozen objects
      *
      * this function is used internally to determine if dependant derivations should be invalidated
      *
-     * has the semantics of `Object.is`, but frozen objects with the same string data properties and the same prototype are compared equal
+     * **Reference**:
+     *
+     * has the semantics of `Object.is`, but frozen objects (`Object.isFrozen`) with the same string data properties and the same prototype are compared equal
+     *
+     * other properties are ignored
      *
      * works recursively, but may return false for self referential nested objects
+     *
+     * never throws, exceptions thrown in traps of the objects being compared are caught and discarded, when this happens this function returns false
      */
     is(a: any, b: any): boolean;
 
-    /** creates a state that gives a view into a property of an object
+    /** **Summary**: creates a state that gives a view into a property of an object
      *
      * sometimes you want to pass a property "by reference", giving someone a state that refers to that property
      *
@@ -185,88 +242,157 @@ export const State: {
      * ```
      * const username_input = create_input(State.view(my_state, "username")); // correct, passing it "by reference"
      * ```
+     *
+     * **Reference**: creates a State object that when called reads the property,
+     * calls to the set method sets the property,
+     * and calls to mut, reads the property inside of `Derived.now` and the new value sets the property
      */
     view<T extends object, K extends keyof T>(target: T, key: K): State<T[K]>;
     view<T extends object, K extends keyof T>(name: string, target: T, key: K): State<T[K]>;
 
-    /** create a proxy state, that gives you full control over how the value is read and written
+    /** **Summary**: create a proxy state, that gives you full control over how the value is read and written
      *
      * no caching is ever done, every access to it calls the getter, calls to the set method call the setter, calls to the mut method call the getter and then the setter
+     *
+     * **Reference**: creates a State object that when called, calls the getter,
+     * calls to the set call the setter
+     * and calls to mut, call the getter inside of `Derived.now` and the new value is used to call the setter
      */
     proxy<T>(getter: () => T, setter: (value: T) => void): State<T>;
     proxy<T>(name: string, getter: () => T, setter: (value: T) => void): State<T>;
 
-    /** an object that is tracked, changes to it can be noticed by derivations that use it
+    /** **Summary**: an object that is tracked, changes to it can be noticed by derivations that use it
      *
-     * you can inherit from this to allow your custom classes to have their properties tracked */
+     * you can inherit from this to allow your custom classes to have their properties tracked (custom classes are not tracked by default, see {@link State.track})
+     *
+     * you can use `instanceof` to test if an object is tracked, `instanceof State.Object` also returns true for tracked arrays
+     *
+     * **Reference**: creates a new object with the correct prototype and already wrapped in a proxy
+     */
     Object: {
-        new(): Object,
-        (): Object,
-        /** use the entire object, the current derivator will rerun if anything in the object changes
+        new(): Object;
+        (): Object;
+        /** **Summary**: use the entire object, the current derivator will rerun if anything in the object changes
          *
-         * this can be used as an optimization to avoid adding dependencies on each and every property individually by using `Derived.now` while still being correct */
+         * this can be used as an optimization to avoid adding dependencies on each and every property individually by using `Derived.now` while still being correct
+         *
+         * **Reference**: adds a "all" dependency of this object to the current derivator, does nothing if target is not tracked or if no derivator is currently running
+         */
         use(target: object): void;
-        prototype: Object,
+        prototype: Object;
+        [Symbol.hasInstance](): boolean;
     };
-    /** an array that is tracked, changes to it can be noticed by derivations that use it */
+    /** **Summary**: an array that is tracked, changes to it can be noticed by derivations that use it
+     *
+     * you can inherit from this to allow your custom classes to have their properties tracked (custom classes are not tracked by default, see {@link State.track})
+     *
+     * you can use `instanceof` to test if an object is tracked, `instanceof State.Object` also returns true for tracked arrays
+     *
+     * **Reference**: creates a new array with the correct prototype and already wrapped in a proxy
+     */
     Array: {
         new <T = any>(arrayLength?: number): T[];
         <T = any>(arrayLength?: number): T[];
-        /** use the entire array, the current derivator will rerun if anything in the array changes
+        /** **Summary**: use the entire array, the current derivator will rerun if anything in the array changes
          *
-         * this can be used as an optimization to avoid adding dependencies on each and every item individually by using `Derived.now` while still being correct */
+         * this can be used as an optimization to avoid adding dependencies on each and every item individually by using `Derived.now` while still being correct
+         *
+         * **Reference**: adds a "all" dependency of this array to the current derivator, does nothing if target is not tracked or if no derivator is currently running
+         */
         use(target: unknown[]): void;
         readonly prototype: any[];
+        [Symbol.hasInstance](): boolean;
     };
 };
 export namespace State {
+    /** **Summary**: a type alias to define that you expect a State of `T` for you to mutate, but that an immutable `T` or a derivation that returns a `T` is also fine
+     *
+     * this could be used for example as the value attribute of an input,
+     *
+     * use this to express that somewhere accepts derived but also accepts just the plain values for convenience
+     *
+     * interfaces that use this alias can check if the value is an instance of State to perform mutations on it
+     *
+     * this type has the semantics of possibly mutating the value if a State is passed
+     *
+     * although do note that it accepts the exact same values as `Derived.Or`, because `State` is a subtype of `Derived`
+     */
     type Or<T> = T | Derived<T> | State<T>;
 }
 
-/** do something when the dependencies changes (not lazy)
+/** **Summary**: do something on affected objects when the dependencies changes (not lazy)
  *
- * this is a primitive of the leviathan-state library and should be handled with care
+ * the arguments consist of the objects you will affect, and the affector function at the end, at least one affected object must be specified
  *
- * the last argument is the affector function, which will rerun whenever it dependencies
+ * not specifying an affected object may lead to the effector stopping prematurely due to being garbage collected
  *
- * the constructor schedules a task for the affector to run asyncronously, and schedules a task again when the dependencies change
+ * specifying an affected object that is not affected may lead to the effector overstaying its welcome, and sticking around unexpectedly
  *
- * the affector will keep on affecting until the affector object is garbage collected or it is cleared with the clear method
+ * you can also call {@link Effect.Persistent} to create an effect that may affect everything, so it will affect forever or until its the clear method is called
  *
- * before the affector you can specify the objects or symbols that your function affects, which will guarantee that the affector keeps running until they are garbage collected
+ * or you can  call {@link Effect.Weak} to create an effect object that has no references to itself, making it your responsibility to ensure it does not get garbage collected
  *
- * you can also call Effect.persistent to create a global affector that won't be garbage collected until it is cleared, so it will affect forever or until its the clear methods is called
- *
- * or you can  call Effect.weak to create an affector that has no references to itself, making it your resposibility to ensure it does not get garbage collected
- *
- * note that affected is not the dependencies to the affector, but rather, the objets that are affected by your affector
+ * note that affected is not the dependencies to the affector, but rather, the objects that are affected by your function
  *
  * for example, if you intend update a text node on the dom with new values whenever some derived changes, the text node is the object you must pass as the affected
  *
- * another example, if you intend to log something to the console, and thus you want the affect to last forever, you could pass `console.log` or even `console` as the affected, these would cause the affecto to live forever since console will never be garbage collected
+ * ```
+ * const text = new State("some text");
+ * const node = document.createTextNode("");
+ * new Effect(node, () => {
+ *     node.nodeValue = text();
+ * });
+ * ```
+ * 
+ * another example, if you intend to log something to the console, and thus you want the affect to last forever, you could pass `console.log` or `console` as the affected, these would cause the effect to live forever
+ *
+ * ```
+ * const text = new State("some text");
+ * new Effect(console.log, () => {
+ *     console.log("text changed: ", text());
+ * });
+ * ```
+ *
+ * not calling the clear method on the effect is **not** a memory leak (unless it is a persistent effect)
  *
  * because not adding references will likely cause the affect to be prematurely stopped, in order to create one without them you must specify it explicitly with `Effect.Weak` since for most cases that is not what you want and would simply be bug
  *
  * the fact the affector can be garbage collected is a feature meant to avoid the need to necessarily call clear on it, if everything it could affect is gone then it is safe to discard it
  *
- * do not rely on the garbage collector for the correctness of your program, rely on it only to clear up things you no longer need
- *
  * if you did not setup the references correctly the affector may be prematurely garbage collected, causing some very hard to find bugs
  *
+ * for that {@link Derived.debugLogWeakRefCleanUp} exists, however it could be improved
+ *
+ * **Reference**:
+ *
+ * the affector won't be called if the effect object is garbage collected
+ *
+ * the dependencies of the affector do not keep strong references to it
+ *
+ * the normal effect (not Persistent or Weak) creates strong references from the affected objects to itself, ensuring the effect can't be garbage collected before then
+ *
+ * the effect object won't be garbage collected until the affected can also be garbage collected
+ *
+ * the constructor schedules a task for the affector to run asynchronously, and schedules a task again when the dependencies change (you can force it complete synchronously with a call to run)
+ *
+ * the affector will keep on affecting until the affector object is garbage collected or it is cleared with the clear method
+ *
  * the task scheduled is a microtask, it runs on the same loop and with the same priority as promises
+ *
+ * do not rely on the garbage collector for the correctness of your program, rely on it only to clear up things you no longer need, if you need the affector to stop, find a way to call the `clear` method at the appropriate time
  */
 export interface Effect {
-    /** stops this affector from being called, if a task is pending, it will be called syncronously
+    /** **Summary**: stops this affector from being called, if a task is pending, it will be called synchronously
      *
      * further calls to other methods will do nothing
      */
     clear(): void;
-    /** schedules this affector to be executed in a microtask
+    /** **Summary**: schedules this affector to be executed in a microtask
      *
      * does nothing if the affector was already cleared
      */
     trigger(): void;
-    /** runs the affector syncronously, if a task was pending, it is clears the task before the call
+    /** **Summary**: runs the affector synchronously, if a task was pending, it is cancelled
      *
      * does nothing if the affector was already cleared
      */
@@ -277,22 +403,22 @@ export interface Effect {
     readonly name: string;
 }
 export const Effect: {
-    new (affected: WeakKey, affector: (affector: Effect) => void): Effect;
-    new (...args: [WeakKey, ...WeakKey[], (affector: Effect) => void]): Effect;
-    new (name: string, affected: WeakKey, affector: (affector: Effect) => void): Effect;
-    new (name: string, ...args: [WeakKey, ...WeakKey[], (affector: Effect) => void]): Effect;
+    new(affected: WeakKey, affector: (affector: Effect) => void): Effect;
+    new(...args: [WeakKey, ...WeakKey[], (affector: Effect) => void]): Effect;
+    new(name: string, affected: WeakKey, affector: (affector: Effect) => void): Effect;
+    new(name: string, ...args: [WeakKey, ...WeakKey[], (affector: Effect) => void]): Effect;
     prototype: Effect;
 
-    /** creates an affector that won't get garbage collected before the call to clear
+    /** **Summary**: creates an affector that may affect anything, not calling clear on this **is** a memory leak
      *
      * see the constructor for more information
      */
     Persistent: {
-        new (affector: (affector: Effect) => void): Effect;
-        new (name: string, affector: (affector: Effect) => void): Effect;
+        new(affector: (affector: Effect) => void): Effect;
+        new(name: string, affector: (affector: Effect) => void): Effect;
     };
 
-    /** creates an affector that may be garbage collected, making it your resposibilty to ensure it does not get garbage collected
+    /** **Summary**: creates an affector that may be garbage collected, making it your responsibility to ensure it does not get garbage collected
      *
      * see the constructor for more information
      */
@@ -309,6 +435,10 @@ declare global {
          * the `$` indicates this is a special derived function that works with derived objects, and may not be exactly equivalent to their non deriving counterparts
          *
          * attempting to mutate the resulting array directly will throw errors
+         *
+         * the resulting mapped array is lazy, it will only do work when values are read, because of the derivator is never called in the call to $map
+         *
+         * this call creates no dependencies on the current derivator
          *
          * method added by leviathan-state
          */
@@ -342,7 +472,7 @@ declare global {
          * method added by leviathan-state
          */
         $rejected(): this is { $value: undefined };
-        /** returns the current value, or undefined it this promise is not settled or was rejected
+        /** returns the value, or undefined it this promise is not settled or was rejected
          *
          * using this inside a derivation will cause the derivation to notice when the promise is resolved
          *
@@ -355,7 +485,7 @@ declare global {
          * property added by leviathan-state
          */
         readonly $value: T | undefined;
-        /** returns the current error, or undefined it this promise is not settled or was resolved
+        /** returns the error, or undefined it this promise is not settled or was resolved
          *
          * using this inside a derivation will cause the derivation to notice when the promise is rejected
          *
