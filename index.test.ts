@@ -10,8 +10,6 @@ function promiseWithResolvers<T>(): [Promise<T>, (value: T | PromiseLike<T>) => 
     return [p, f, r];
 }
 
-// TODO! test creating a dependency inside a derivator and then invalidating it right after
-
 describe("State and Derived with caching and invalidation", () => {
     test("State should return the initial value", () => {
         const state = new State(10);
@@ -95,6 +93,15 @@ describe("State and Derived with caching and invalidation", () => {
     test("Derived works with Derived", () => {
         const derived = new Derived(() => 1);
         expect(Derived.now(() => derived())).toBe(1);
+    });
+    test("Derived invalidation within derivator", () => {
+        const state = new State(0);
+        const derived = new Derived(() => {
+            const x = state();
+            if (x < 10) state.set(x + 1);
+            return x;
+        });
+        expect(derived()).toBe(10);
     });
 });
 

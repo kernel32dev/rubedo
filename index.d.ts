@@ -13,6 +13,8 @@
  *
  * a value is considered changed according to the semantics of {@link State.is}
  *
+ * if the derived is invalidated while the derivator is running, the result of the derivator is discarded and the derivator runs again synchronously, if it repeats too many times, an error is thrown
+ *
  * if specified, the name is stored in the object
  */
 export interface Derived<out T> {

@@ -185,12 +185,15 @@ let debugRegistry = null;
 /** @type {((message: string) => void) | null} */
 let debugWeakRefLogger = null;
 
+/** how many times a derivator can repeat because it invalidated itself before giving up */
+const maximumDerivedRepeats = 50;
+
+/** how much Object.is can recurse before the recursion guard starts being used */
 const maximumFrozenComparisonsDepth = 10;
-/** how much Object.is can recurse before the recursion guard starts being used
- *
- * the comparator can't detect recursion before this runs out
- */
+
+/** the isr function can't detect recursion before this runs out */
 let remainingFrozenComparisonsDepth = maximumFrozenComparisonsDepth;
+
 /** the set of frozen objects being used in a State.is after all remainingFrozenComparisonsDepth were exhausted
  *
  * note that it is safe to use a WeakSet here because all values referenced in this set are on the stack
@@ -303,9 +306,12 @@ function Derived(name, derivator) {
             const old_value = Derived[sym_value];
             try {
                 delete Derived[sym_value];
-                Derived[sym_weak] = new_weak;
-                const value = track(derivator());
-                return Derived[sym_value] = value;
+                for (let i = 0; i < maximumDerivedRepeats; i++) {
+                    Derived[sym_weak] = new_weak;
+                    const value = track(derivator());
+                    if (Derived[sym_weak]) return Derived[sym_value] = value;
+                }
+                throw new RangeError("Too many self invalidations");
             } catch (e) {
                 Derived[sym_value] = old_value;
                 Derived[sym_weak] = old_weak;
