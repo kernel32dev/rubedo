@@ -589,10 +589,8 @@ function Effect() {
     return affector;
 }
 
-Effect.prototype = AffectorPrototype;
-
 defineProperties(Effect, {
-	Persistent: function Persistent(name, affector) {
+    Persistent: function Persistent(name, affector) {
         if (!new.target) throw new TypeError("Constructor Effect.Persistent requires 'new'");
         if (arguments.length == 1) {
             affector = name;
@@ -602,7 +600,7 @@ defineProperties(Effect, {
         if (affector[sym_affect_task] !== undefined) affectFunctionsRefs.add(affector);
         return affector;
     },
-	Weak: function Weak(name, affector) {
+    Weak: function Weak(name, affector) {
         if (!new.target) throw new TypeError("Constructor Effect.Weak requires 'new'");
         if (arguments.length == 1) {
             affector = name;
@@ -610,7 +608,11 @@ defineProperties(Effect, {
         }
         return createAffector(name, affector, typeof new.target.prototype == "object" ? new.target.prototype : AffectorPrototype);
     },
-})
+});
+
+Effect.prototype = AffectorPrototype;
+Effect.Persistent.prototype = AffectorPrototype;
+Effect.Weak.prototype = AffectorPrototype;
 
 function createAffector(name, affector, prototype) {
     if (typeof affector != "function") throw new TypeError("affector is not a function");
