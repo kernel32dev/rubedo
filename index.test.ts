@@ -1,4 +1,4 @@
-import { Effect, Derived, State } from ".";
+import { Effect, Derived, State, Signal } from ".";
 
 /** await this promise to wait for all microtasks to complete */
 const microtask = Promise.resolve();
@@ -747,27 +747,27 @@ describe("tracked map", () => {
     test("derivation notice changes in tracked Map made with track", () => {
         const map = State.track<Map<string, number>>(new Map());
         const derived = new Derived(() => map.get("key"));
-        
+
         expect(derived()).toBe(undefined);
-        
+
         map.set("key", 42);
         expect(derived()).toBe(42);
-        
+
         map.set("key", 100);
         expect(derived()).toBe(100);
-        
+
         map.delete("key");
         expect(derived()).toBe(undefined);
     });
     test("derivation notice presence changes in tracked Map made with track", () => {
         const map = State.track<Map<string, number>>(new Map());
         const derived = new Derived(() => map.has("key"));
-        
+
         expect(derived()).toBe(false);
-        
+
         map.set("key", 42);
         expect(derived()).toBe(true);
-        
+
         map.delete("key");
         expect(derived()).toBe(false);
     });
@@ -777,12 +777,12 @@ describe("tracked set", () => {
     test("derivation notice changes in tracked Set made with track", () => {
         const set = State.track<Set<string>>(new Set());
         const derived = new Derived(() => set.has("key"));
-        
+
         expect(derived()).toBe(false);
-        
+
         set.add("key");
         expect(derived()).toBe(true);
-        
+
         set.delete("key");
         expect(derived()).toBe(false);
     });
@@ -806,7 +806,7 @@ describe("State.is", () => {
         expect(is(c, a)).toBe(false);
     });
     test("recursive objects may return unequal", () => {
-        type RecursiveObject = {head:string, tail: RecursiveObject | null };
+        type RecursiveObject = { head: string, tail: RecursiveObject | null };
 
         const a: RecursiveObject = { head: "value", tail: null };
         a.tail = a;
@@ -818,5 +818,58 @@ describe("State.is", () => {
         State.freeze(b);
 
         expect(State.is(a, b)).toBe(false);
+    });
+});
+
+describe("Signal", () => {
+    test("Signal constructor", () => {
+        const signal = new Signal();
+        expect(signal()).toBe(undefined);
+    });
+    test("Signal calls persistent handlers", () => {
+        const signal = new Signal();
+        const mock = jest.fn();
+        expect(mock).toHaveBeenCalledTimes(0);
+        expect(signal()).toBe(undefined);
+        expect(mock).toHaveBeenCalledTimes(0);
+        signal.persistent(mock);
+        expect(mock).toHaveBeenCalledTimes(0);
+        expect(signal()).toBe(undefined);
+        expect(mock).toHaveBeenCalledTimes(1);
+        signal.off(mock);
+        expect(mock).toHaveBeenCalledTimes(1);
+        expect(signal()).toBe(undefined);
+        expect(mock).toHaveBeenCalledTimes(1);
+    });
+    test("Signal calls weak handlers", () => {
+        const signal = new Signal();
+        const mock = jest.fn();
+        expect(mock).toHaveBeenCalledTimes(0);
+        expect(signal()).toBe(undefined);
+        expect(mock).toHaveBeenCalledTimes(0);
+        signal.weak(mock);
+        expect(mock).toHaveBeenCalledTimes(0);
+        expect(signal()).toBe(undefined);
+        expect(mock).toHaveBeenCalledTimes(1);
+        signal.off(mock);
+        expect(mock).toHaveBeenCalledTimes(1);
+        expect(signal()).toBe(undefined);
+        expect(mock).toHaveBeenCalledTimes(1);
+    });
+    test("Signal calls regular handlers", () => {
+        const signal = new Signal();
+        const mock = jest.fn();
+        const affected = {};
+        expect(mock).toHaveBeenCalledTimes(0);
+        expect(signal()).toBe(undefined);
+        expect(mock).toHaveBeenCalledTimes(0);
+        signal.on(affected, mock);
+        expect(mock).toHaveBeenCalledTimes(0);
+        expect(signal()).toBe(undefined);
+        expect(mock).toHaveBeenCalledTimes(1);
+        signal.off(mock);
+        expect(mock).toHaveBeenCalledTimes(1);
+        expect(signal()).toBe(undefined);
+        expect(mock).toHaveBeenCalledTimes(1);
     });
 });

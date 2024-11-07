@@ -73,9 +73,6 @@ const sym_piweak = Symbol("piweak");
  */
 const sym_value = Symbol("value");
 
-/** the derivator function of the derivator object, exists on Derived and on DerivedMapArray */
-const sym_derivator = Symbol("derivator");
-
 /** this symbol is present on active affector functions
  *
  * when those derivations are invalidated, a microtask is scheduled to automatically rerun the derivator
@@ -143,11 +140,46 @@ const sym_ders_resolved = Symbol("ders_resolved");
 /** used by Promise */
 const sym_ders_rejected = Symbol("ders_rejected");
 
+/** used by Signal */
+const sym_handlers = Symbol("handlers");
+/** used by Signal */
+const sym_weakrefs = Symbol("weakrefs");
+
 //#endregion
 //#region globals
 
-/** @typedef {{ [sym_pideps]: Map<WeakRef<Derived>, any>, [sym_ders]: Set<WeakRef<Derived>>, [sym_weak]: WeakRef<Derived>, [sym_value]?: any }} Derived */
-/** @typedef {any[] & { [sym_ders]: Set<WeakRef<Derived>>[], [sym_slots]: Set<WeakRef<Derived>>[], [sym_len]: Set<WeakRef<Derived>>, [sym_all]: Set<WeakRef<Derived>>, [sym_value]: StateArray, [sym_tracked]: StateArray }} StateArray */
+
+/** the derivator function of the derivator object, exists on Derived and on DerivedMapArray */
+const sym_mapfn = Symbol("mapfn");
+
+/** Derived
+ * @typedef {{
+ *     (): any,
+ *     [sym_pideps]: Map<WeakRef<Derived>, any>,
+ *     [sym_ders]: Set<WeakRef<Derived>>,
+ *     [sym_weak]: WeakRef<Derived>,
+ *     [sym_value]?: any,
+ * }} Derived
+ */
+
+/** StateArray
+ * @typedef {any[] & {
+ *     [sym_ders]: Set<WeakRef<Derived>>[],
+ *     [sym_slots]: Set<WeakRef<Derived>>[],
+ *     [sym_len]: Set<WeakRef<Derived>>,
+ *     [sym_all]: Set<WeakRef<Derived>>,
+ *     [sym_value]: StateArray,
+ *     [sym_tracked]: StateArray,
+ * }} StateArray
+ */
+
+/** DerivedMapArray
+ * @typedef {StateArray & {
+ *     [sym_src]: StateArray,
+ *     [sym_mapfn](value: T, index: Derived, array: T[]): U,
+ *     [sym_cache]: WeakMap<Set<WeakKey<Derived>>, Derived>,
+ * }} DerivedMapArray
+ */
 
 /** if this value is set, it is the weak ref of the derived currently running at the top of the stack
  *
@@ -1692,12 +1724,10 @@ function DerivedMapArray(src, derivator, thisArg) {
     Object.defineProperty(value, sym_tracked, { value: proxy });
 
     Object.defineProperty(value, sym_src, { value: src });
-    Object.defineProperty(value, sym_derivator, { value: derivator.bind(thisArg) });
+    Object.defineProperty(value, sym_mapfn, { value: derivator.bind(thisArg) });
     Object.defineProperty(value, sym_cache, { value: new WeakMap() });
     return proxy;
 }
-
-/** @typedef {StateArray & {[sym_src]: StateArray, [sym_derivator](value: T, index: Derived, array: T[]): U, [sym_cache]: WeakMap<Set<WeakKey<Derived>>, Derived>}} DerivedMapArray */
 
 /** @type {ProxyHandler<DerivedMapArray>} */
 const DerivedMapArrayProxyHandler = {
@@ -1787,7 +1817,7 @@ function derivedMapArrayGet(target, index) {
                 slot_set.add(derived_slot[sym_weak]);
                 current_derived_used = true;
                 const value = Derived.now(() => src[index]);
-                return target[sym_derivator](value, derived_index, tracked);
+                return target[sym_mapfn](value, derived_index, tracked);
             }
         });
         cache.set(slot_set, cached = derived_slot);
@@ -2185,9 +2215,130 @@ function promiseUseSetBySymbol(promise, sym) {
 
 //#endregion
 
+//#region Signal
+
+/** @typedef {(this: any, ...args: any[]) => void} SignalHandler */
+
+/** a map from strong handlers to null and from weak references to the weakmap that keeps weak handlers alive (or rather associated to this signal)
+ * @typedef {Map<SignalHandler | WeakRef<SignalHandler>, WeakMap<WeakKey, SignalHandler> | null>} SignalHandlers */
+
+/** the weak map that stores the weakrefs of known handlers
+ * @typedef {WeakMap<SignalHandler, WeakRef<SignalHandler>>} SignalWeakRefs */
+
+/** @typedef {{[sym_handlers]: SignalHandlers, [sym_weakrefs]: SignalWeakRefs}} Signal */
+
+const SignalPrototype = { __proto__: Function.prototype };
+
+function Signal() {
+    if (!new.target) throw new TypeError("Constructor Signal requires 'new'");
+    Object.setPrototypeOf(Signal, typeof new.target.prototype == "object" ? new.target.prototype : SignalPrototype);
+    Object.defineProperty(Signal, sym_handlers, { value: new Map(), writable: false, enumerable: false, configurable: false });
+    Object.defineProperty(Signal, sym_weakrefs, { value: new WeakMap(), writable: false, enumerable: false, configurable: false });
+    return Signal;
+    function Signal() {
+        /** @type {SignalHandlers} */
+        const handlers = Signal[sym_handlers];
+        const copy = Array.from(handlers.keys());
+        const length = copy.length;
+        for (let i = 0; i < length; i++) {
+            const weakref = copy[i];
+            if (typeof weakref == "function") {
+                weakref.apply(this, arguments);
+            } else {
+                const handler = weakref.deref();
+                if (!handler) {
+                    handlers.delete(weakref);
+                } else {
+                    handler.apply(this, arguments);
+                }
+            }
+        }
+    }
+}
+
+Signal.prototype = SignalPrototype;
+
+defineProperties(SignalPrototype, {
+    constructor: Signal,
+    on() {
+        if (arguments.length < 2) {
+            throw new TypeError("Failed to call method 'on' 2 arguments required, but only " + arguments.length + " present");
+        }
+        signalAddWeakHandler(this, arguments);
+        return this;
+    },
+    /** @this {Signal} @param {SignalHandler} handler */
+    off(handler) {
+        if (typeof handler != "function") throw new TypeError("handler is not a function");
+        const weakrefs = this[sym_weakrefs];
+        const weakref = weakrefs.get(handler);
+        if (weakref) {
+            // weak handler, delete it from the handlers and weakrefs
+            this[sym_handlers].delete(weakref);
+            weakrefs.delete(handler);
+        } else {
+            // strong handler, delete it just from the handlers
+            this[sym_handlers].delete(handler);
+        }
+        return this;
+    },
+    /** @this {Signal} @param {SignalHandler} handler */
+    persistent(handler) {
+        if (typeof handler != "function") throw new TypeError("handler is not a function");
+        const weakrefs = this[sym_weakrefs];
+        const weakref = weakrefs.get(handler);
+        if (weakref) {
+            // if it is an existing weak handler, make it permanent by adding a reference on the weak map that won't ever broken
+            this[sym_handlers].get(weakref).set(this, handler);
+        } else {
+            // otherwise just add it as a strong handler
+            this[sym_handlers].set(handler, null);
+        }
+        return this;
+    },
+    weak() {
+        signalAddWeakHandler(this, arguments.length == 1 ? arguments : [arguments[0]]);
+        return this;
+    },
+});
+
+/** @param {Signal} signal @param {{[key: number]: any; length: number}} args */
+function signalAddWeakHandler(signal, args) {
+    const handler_index = args.length - 1;
+    /** @type {SignalHandler} */
+    const handler = args[handler_index];
+    if (typeof handler != "function") throw new TypeError("handler is not a function");
+    const handlers = signal[sym_handlers];
+    const weakrefs = signal[sym_weakrefs];
+
+    // if already a strong handler then nothing to do
+    if (handlers.get(handler)) return;
+
+    let weakmap;
+
+    // initialize a weakref for it
+    let weakref = weakrefs.get(handler);
+    if (!weakref) {
+        // weakref does not yet exist, then create it and add it to the handler map with the new weak map as the value
+        weakrefs.set(handler, weakref = new WeakRef(handler));
+        handlers.set(weakref, weakmap = new WeakMap());
+    } else {
+        // weakref already exists, get the existing weakmap
+        weakmap = handlers.get(weakref);
+    }
+
+    // add the strong references to the weakmap
+    for (let i = 0; i < handler_index; i++) {
+        weakmap.set(args[i], handler);
+    }
+}
+
+//#endregion
+
 module.exports = {
     __proto__: null,
     Derived,
     State,
     Effect,
+    Signal,
 };

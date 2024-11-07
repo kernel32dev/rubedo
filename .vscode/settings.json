@@ -9,6 +9,7 @@
         "nocheck",
         "pideps",
         "piweak",
-        "weakref"
+        "weakref",
+        "weakrefs"
     ]
 }

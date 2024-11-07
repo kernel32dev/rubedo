@@ -466,6 +466,51 @@ export const Effect: {
     };
 };
 
+/** **Summary**: a function that when called, calls all the handlers
+ *
+ * its purpose is to be a function that can be declared first, and defined later
+ *
+ * it is like a reverse callback, instead of passing the callback so someone can call you,
+ * you pass a signal so you can call them
+ *
+ * adding persistent handlers may lead to unwanted strong references and memory leaks,
+ * so signals have the same mechanism of having the handlers list out the things they affect,
+ * and allowing them to be garbage collected only after the affected
+ *
+ * **Reference**: when it is called it calls all handlers, forwarding the arguments and the this object, the handlers are called in the order they are added
+ */
+export type Signal<T extends (...args: any[]) => void> = Signal.Handler<T> & Signal.Prototype<T>;
+
+export const Signal: {
+    new <T extends (...args: any[]) => void>(): Signal<T>;
+    prototype: Signal<any>;
+};
+export namespace Signal {
+    /** **Summary**: the function that a `Signal<T>` accepts as handler, the `Signal<T>` also has the same call signature as its handlers
+     *
+     * **Reference**: the same function as T, except that it returns void */
+    type Handler<T extends (...args: any[]) => void> =
+        T extends (this: infer This, ...args: any[]) => void
+        ? (this: This, ...args: T extends (...args: infer Args) => void ? Args : []) => void
+        : (...args: T extends (...args: infer Args) => void ? Args : []) => void;
+    /** **Summary**: the methods found in signals
+     *
+     * **Reference**: due to how typescript works, interfaces can't extend `Signal.Handler`, so `Signal` is a type alias and the interface is found here, so it can still be extended if necessary */
+    interface Prototype<T extends (...args: any[]) => void> {
+        /** adds a handler that will stop when garbage collected
+         *
+         * but that will not be garbage collected while the objects passed are alive (the affected)
+         */
+        on(...args: [WeakKey, ...WeakKey[], Signal.Handler<T>]): this;
+        /** stops a handler from being called, works on handler added with both the `on` and `weak` methods */
+        off(handler: Signal.Handler<T>): this;
+        /** adds a handler that will only stop being called when it is removed with the off method */
+        persistent(handler: Signal.Handler<T>): this;
+        /** adds a handler that will stop when garbage collected */
+        weak(handler: Signal.Handler<T>): this;
+    }
+}
+
 declare global {
     interface Array<T> {
         /** creates a new mapped array, whose values are automatically kept up to date, by calling the function whenever dependencies change and are needed
