@@ -537,6 +537,8 @@ declare global {
          *
          * if the value is true that means the promise is resolved, but if the value is false, that doesn't mean the promise isn't resolved
          *
+         * it's that way because we can't look inside the promise to get its value synchronously, we can however add a handler to update a value we can read synchronously, and that is what we do
+         *
          * however, because it notifies on change it is completely safe and correct to call this from derivations
          *
          * the `$` indicates this is a method added by leviathan-state
@@ -550,11 +552,39 @@ declare global {
          *
          * if the value is true that means the promise is rejected, but if the value is false, that doesn't mean the promise isn't rejected
          *
+         * it's that way because we can't look inside the promise to get its value synchronously, we can however add a handler to update a value we can read synchronously, and that is what we do
+         *
          * however, because it notifies on change it is completely safe and correct to call this from derivations
          *
          * the `$` indicates this is a method added by leviathan-state
          */
         $rejected(): this is { $value: undefined };
+        /** returns true if this promise is already resolved or rejected
+         *
+         * calling this inside a derivation will cause the derivation to notice when the promise is settled
+         *
+         * note that the value returned is updated by the tracker of leviathan state and might not be true even if the promise is settled
+         *
+         * if the value is true that means the promise is settled, but if the value is false, that doesn't mean the promise isn't settled
+         *
+         * it's that way because we can't look inside the promise to get its value synchronously, we can however add a handler to update a value we can read synchronously, and that is what we do
+         *
+         * however, because it notifies on change it is completely safe and correct to call this from derivations
+         *
+         * the `$` indicates this is a method added by leviathan-state
+         */
+        $settled(): boolean;
+        /** if the promise is resolved, returns its value
+         *
+         * if the promise is rejected, throws the error
+         *
+         * if the promise is not settled, returns undefined
+         *
+         * essentially its like an `await` except it returns synchronously if the promise is not settled
+         *
+         * the `$` indicates this is a method added by leviathan-state
+         */
+        $now(): this["$value"];
         /** returns the value, or undefined it this promise is not settled or was rejected
          *
          * using this inside a derivation will cause the derivation to notice when the promise is resolved
@@ -575,6 +605,8 @@ declare global {
          * note that this value is updated by the tracker of leviathan state and might not contain the value even if the promise is rejected
          *
          * if the value is here that means the promise is rejected, but if the value isn't here, that doesn't mean the promise isn't rejected
+         *
+         * it's that way because we can't look inside the promise to get its value synchronously, we can however add a handler to update a value we can read synchronously, and that is what we do
          *
          * however, because it notifies on change it is completely safe and correct to use this from derivations
          *

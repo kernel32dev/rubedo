@@ -2174,6 +2174,18 @@ defineProperties(Promise.prototype, {
         if (!(sym_resolved in this)) promiseUseSetBySymbol(this, sym_ders_rejected);
         return false;
     },
+    $settled() {
+        if (sym_resolved in this || sym_rejected in this) return true;
+        promiseUseSetBySymbol(this, sym_ders_resolved);
+        promiseUseSetBySymbol(this, sym_ders_rejected);
+        return false;
+    },
+    $now() {
+        if (sym_resolved in this) return this[sym_resolved];
+        if (sym_rejected in this) throw this[sym_rejected];
+        promiseUseSetBySymbol(this, sym_ders_resolved);
+        promiseUseSetBySymbol(this, sym_ders_rejected);
+    },
 });
 
 Object.defineProperty(Promise.prototype, "$value", {

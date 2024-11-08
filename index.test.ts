@@ -741,6 +741,40 @@ describe("tracked promise", () => {
         await microtask;
         expect(rejected()).toBe("reason");
     });
+    test("$settled notifies derived on resolution", async () => {
+        const [p, f, r] = promiseWithResolvers<number>();
+        const settled = new Derived(() => p.$settled());
+        expect(settled()).toBe(false);
+        f(100);
+        expect(settled()).toBe(false);
+        await microtask;
+        expect(settled()).toBe(true);
+    });
+    test("$settled notifies derived on rejection", async () => {
+        const [p, f, r] = promiseWithResolvers<number>();
+        const settled = new Derived(() => p.$settled());
+        expect(settled()).toBe(false);
+        r("reason");
+        expect(settled()).toBe(false);
+        await microtask;
+        expect(settled()).toBe(true);
+    });
+    test("$now returns value if resolved", async () => {
+        const [p, f, r] = promiseWithResolvers<number>();
+        const now = new Derived(() => p.$now());
+        expect(now()).toBe(undefined);
+        f(100);
+        await microtask;
+        expect(now()).toBe(100);
+    });
+    test("$now returns undefined if rejected", async () => {
+        const [p, f, r] = promiseWithResolvers<number>();
+        const now = new Derived(() => p.$now());
+        expect(now()).toBe(undefined);
+        r(new Error("reason"));
+        await microtask;
+        expect(() => now()).toThrow("reason");
+    });
 });
 
 describe("tracked map", () => {
