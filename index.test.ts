@@ -390,6 +390,59 @@ describe("Derived static helpers", () => {
     });
 });
 
+describe("Derived forwarding methods", () => {
+    test("valueOf", () => {
+        const ref = {};
+        expect(Derived.from({valueOf() { return ref; }}).valueOf()).toBe(ref);
+        expect(Derived.from(null).valueOf()).toBe(null);
+        expect(Derived.from(undefined).valueOf()).toBe(undefined);
+    });
+    test("toString", () => {
+        const ref = {};
+        expect(Derived.from({toString() { return ref; }}).toString()).toBe(ref);
+        expect(Derived.from(null).toString()).toBe("null");
+        expect(Derived.from(undefined).toString()).toBe("undefined");
+    });
+    test("toLocaleString", () => {
+        const ref = {};
+        expect(Derived.from({toLocaleString() { return ref; }}).toLocaleString()).toBe(ref);
+        expect(Derived.from(null).toLocaleString()).toBe("null");
+        expect(Derived.from(undefined).toLocaleString()).toBe("undefined");
+    });
+    test("toJSON", () => {
+        const ref = State.track({});
+        expect(Derived.from({toJSON() { return ref; }}).toJSON()).toBe(ref);
+        expect(Derived.from(ref).toJSON()).toBe(ref);
+        expect(Derived.from(null).toJSON()).toBe(null);
+        expect(Derived.from(undefined).toJSON()).toBe(undefined);
+    });
+    test("Symbol.iterator", () => {
+        const derived = Derived.from([1, 2, 3]);
+        const output = [] as number[];
+        for (const i of derived) output.push(i);
+        expect(output).toEqual([1, 2, 3]);
+    });
+    test("Symbol.asyncIterator", async () => {
+        const derived = Derived.from([1, 2, 3]);
+        const output = [] as number[];
+        for await (const i of derived) output.push(i);
+        expect(output).toEqual([1, 2, 3]);
+    });
+    test("Symbol.iterator throws", () => {
+        expect(() => {
+            const derived = Derived.from<number[]>(null!);
+            for (const i of derived) {}
+        }).toThrow();
+    });
+    // Polyfill breaks this test
+    // test("Symbol.asyncIterator throws", async () => {
+    //     expect(async () => {
+    //         const derived = Derived.from<number[]>(null!);
+    //         for await (const i of derived) {}
+    //     }).toThrow();
+    // });
+});
+
 describe("type guards", () => {
     test("Constructor Derived requires 'new'", () => {
         expect(() => {
@@ -776,6 +829,18 @@ describe("tracked promise", () => {
         expect(() => now()).toThrow("reason");
     });
 });
+
+const a = new State<null | {
+    toString(): "teste";
+}>({
+    toString() {
+        return "teste";
+    }
+});
+const b = a.toString();
+
+const a2 = new State<null | Number>(new Number(3));
+const b2 = a2.valueOf();
 
 describe("tracked map", () => {
     test("derivation notice changes in tracked Map made with track", () => {

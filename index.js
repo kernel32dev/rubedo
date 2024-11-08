@@ -255,8 +255,47 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
         return new Derived(function derive() {
             return derivator(derived());
         });
-    }
+    },
+    valueOf() {
+        const value = this();
+        return value === null || value === undefined ? value : value.valueOf();
+    },
+    toString() {
+        const value = this();
+        return value === null ? "null" : value === undefined ? "undefined" : value.toString.apply(value, arguments);
+    },
+    toLocaleString() {
+        const value = this();
+        return value === null ? "null" : value === undefined ? "undefined" : value.toLocaleString.apply(value, arguments);
+    },
+    toJSON() {
+        const value = this();
+        if (value && typeof value.toJSON == "function") return value.toJSON();
+        return value;
+    },
 });
+
+Object.defineProperty(DerivedPrototype, Symbol.iterator, {
+    get: {[Symbol.iterator]() {
+        return Symbol.iterator in Object(this()) ? derivedIteratorMethod : undefined;
+    }}[Symbol.iterator],
+    enumerable: false,
+    configurable: true,
+});
+Object.defineProperty(DerivedPrototype, Symbol.asyncIterator, {
+    get: {[Symbol.asyncIterator]() {
+        return Symbol.asyncIterator in Object(this()) ? derivedAsyncIteratorMethod : undefined;
+    }}[Symbol.asyncIterator],
+    enumerable: false,
+    configurable: true,
+});
+
+function derivedIteratorMethod() {
+    return this()[Symbol.iterator]();
+}
+function derivedAsyncIteratorMethod() {
+    return this()[Symbol.asyncIterator]();
+}
 
 /** @param {Map<WeakRef<Derived>, any>} pideps @param {WeakRef<Derived>} [recreate_weak_link]   */
 function possibleInvalidationIsInvalidated(pideps, recreate_weak_link) {

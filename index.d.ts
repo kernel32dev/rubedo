@@ -34,6 +34,68 @@ export interface Derived<out T> {
 
     /** the name specified when creating this object */
     readonly name: string;
+
+    /** **Summary**: calls the `valueOf` method of the value inside, forwarding the arguments
+     *
+     * if the value is null or undefined, returns the value
+     *
+     * will throw if the method is not present
+     *
+     * **Reference**:
+     *
+     * calls `this`, if the resulting value is null or undefined returns the value,
+     *
+     * otherwise calls the `valueOf` method on the value, the return value is returned
+     *
+     * if the `valueOf` property is not present or not a function then a type error will be thrown
+     */
+    valueOf(): (T extends { valueOf(): infer U } ? U : never) | (T & (null | undefined));
+
+    /** **Summary**: calls the `toString` method of the value inside, forwarding the arguments
+     *
+     * if the value is null or undefined, returns them cast to string (does not throw on null or undefined)
+     *
+     * will throw if the method is not present
+     *
+     * **Reference**:
+     *
+     * calls `this`, if the resulting value is null or undefined returns them cast to string,
+     *
+     * otherwise calls the `toString` method on the value forwarding the arguments, the return value is returned
+     *
+     * if the `toString` property is not present or not a function then a type error will be thrown
+     */
+    toString(...args: T extends { toString(...args: infer U): any } ? U : []):
+        (T extends { toString(...args: any[]): infer U } ? U : never)
+        | ((T & null) extends never ? never : "null")
+        | ((T & undefined) extends never ? never : "undefined");
+
+    /** **Summary**: calls the `toLocaleString` method of the value inside, forwarding the arguments
+     *
+     * if the value is null or undefined, returns them cast to string (does not throw on null or undefined)
+     *
+     * will throw if the method is not present
+     *
+     * **Reference**:
+     *
+     * calls `this`, if the resulting value is null or undefined returns them cast to string,
+     *
+     * otherwise calls the `toLocaleString` method on the value forwarding the arguments, the return value is returned
+     *
+     * if the `toLocaleString` property is not present or not a function then a type error will be thrown
+     */
+    toLocaleString(...args: T extends { toLocaleString(...args: infer U): any } ? U : []):
+        (T extends { toLocaleString(...args: any[]): infer U } ? U : never)
+        | ((T & null) extends never ? never : "null")
+        | ((T & undefined) extends never ? never : "undefined");
+
+    /** **Summary**: allows you to pass derivations to `JSON.stringify`
+     *
+     * **Reference**: calls `this` and returns it, but if the resulting value as a function property `toJSON` it is called and the return value is returned instead */
+    toJSON(): T extends { toJSON(): infer U } ? U : T;
+
+    [Symbol.asyncIterator](): T extends { [Symbol.asyncIterator](): infer U } ? U : undefined;
+    [Symbol.iterator](): T extends { [Symbol.iterator](): infer U } ? U : undefined;
 }
 export const Derived: {
     new <T>(derivator: () => T): Derived<T>;
