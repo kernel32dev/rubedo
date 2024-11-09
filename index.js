@@ -191,6 +191,8 @@ let current_derived = null;
 /** flag that is set everytime the derivation is used
  *
  * useful to detect when a derivation has no dependencies
+ *
+ * TODO! now that derived does not clear itself, current_derived_used is not used, find another use for it or delete it
  */
 let current_derived_used = true;
 
@@ -714,9 +716,7 @@ function createAffector(name, affector, prototype) {
             const old_derived_used = current_derived_used;
             current_derived = weak;
             try {
-                current_derived_used = null;
                 affector(obj);
-                if (!current_derived_used) clearAffector(obj);
             } finally {
                 current_derived = old_derived;
                 current_derived_used = old_derived_used;
