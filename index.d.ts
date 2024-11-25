@@ -126,7 +126,7 @@ export const Derived: {
      */
     use<T>(value: T | Derived<T>): T;
 
-    /** set this property to a function to log when any `WeakRef` created by leviathan is garbage collected */
+    /** set this property to a function to log when any `WeakRef` created by rubedo is garbage collected */
     debugLogWeakRefCleanUp: ((message: string) => void) | null,
 };
 export namespace Derived {
@@ -145,7 +145,7 @@ export namespace Derived {
 
 /** **Summary**: hold a single mutable value
  *
- * this is the canonical way to represent a single value that can change, because leviathan can't track changes to local variables created with `let` and `var`
+ * this is the canonical way to represent a single value that can change, because rubedo can't track changes to local variables created with `let` and `var`
  *
  * the use of `let` and `var` can easily create bugs because of this,
  *
@@ -161,7 +161,7 @@ export namespace Derived {
  * });
  * ```
  *
- * but let's say you that you this object to maybe be null, you can't just put it in a `let` since leviathan won't be able to track it, so instead you could use an instance of the `State` class
+ * but let's say you that you this object to maybe be null, you can't just put it in a `let` since rubedo won't be able to track it, so instead you could use an instance of the `State` class
  *
  * ```
  * const my_shared_state = new State<null | {
@@ -208,11 +208,11 @@ export const State: {
     new <T>(name: string, value: T): State<T>;
     prototype: State<any>;
 
-    /** **Summary**: adds tracking to an object so leviathan can notice when it is read and written to
+    /** **Summary**: adds tracking to an object so rubedo can notice when it is read and written to
      *
-     * leviathan can create dependency trees and update graphs without a compiler, but without a dedicated compilation step, it may need to give it a hand so it can do its job
+     * rubedo can create dependency trees and update graphs without a compiler, but without a dedicated compilation step, it may need to give it a hand so it can do its job
      *
-     * if something is not tracked, it means leviathan won't be able to rerun derivations when that thing changes, this can be the cause of very subtle bugs
+     * if something is not tracked, it means rubedo won't be able to rerun derivations when that thing changes, this can be the cause of very subtle bugs
      *
      * putting an object in a tracked object causes it to be also be tracked, in other it spreads to the best of its ability
      *
@@ -231,7 +231,7 @@ export const State: {
      *
      * also note that some tracking requires wrapping the object in a proxy,
      * and thus the original value may not tracked,
-     * this means references created before the call to track may be used to mutate the object without leviathan noticing
+     * this means references created before the call to track may be used to mutate the object without rubedo noticing
      *
      * ```
      * const not_tracked = {};
@@ -259,7 +259,7 @@ export const State: {
      *
      * note that you can also use `Object.freeze` to create data objects, but the properties won't be tracked (eg: wrapping objects and arrays in a proxy)
      *
-     * frozen objects have special handling when being compared in leviathan
+     * frozen objects have special handling when being compared in rubedo
      *
      * frozen objects are compared equal to other frozen objects with the same string data properties and the same prototype, however the order can vary
      *
@@ -576,7 +576,7 @@ declare global {
          *
          * this call creates no dependencies on the current derivator
          *
-         * the `$` indicates this is a method added by leviathan-state
+         * the `$` indicates this is a method added by rubedo-state
          */
         $map<U>(derivator: (value: T, index: Derived<number>, array: T[]) => U): U[];
         $map<U, This>(derivator: (this: This, value: T, index: Derived<number>, array: T[]) => U, thisArg: This): U[];
@@ -586,7 +586,7 @@ declare global {
          *
          * calling this inside a derivation will cause the derivation to notice when the promise is resolved
          *
-         * note that the value returned is updated by the tracker of leviathan state and might not be true even if the promise is resolved
+         * note that the value returned is updated by the tracker of rubedo state and might not be true even if the promise is resolved
          *
          * if the value is true that means the promise is resolved, but if the value is false, that doesn't mean the promise isn't resolved
          *
@@ -594,14 +594,14 @@ declare global {
          *
          * however, because it notifies on change it is completely safe and correct to call this from derivations
          *
-         * the `$` indicates this is a method added by leviathan-state
+         * the `$` indicates this is a method added by rubedo-state
          */
         $resolved(): this is { $value: T };
         /** returns true if this promise is already rejected (has `$error`)
          *
          * calling this inside a derivation will cause the derivation to notice when the promise is rejected
          *
-         * note that the value returned is updated by the tracker of leviathan state and might not be true even if the promise is rejected
+         * note that the value returned is updated by the tracker of rubedo state and might not be true even if the promise is rejected
          *
          * if the value is true that means the promise is rejected, but if the value is false, that doesn't mean the promise isn't rejected
          *
@@ -609,14 +609,14 @@ declare global {
          *
          * however, because it notifies on change it is completely safe and correct to call this from derivations
          *
-         * the `$` indicates this is a method added by leviathan-state
+         * the `$` indicates this is a method added by rubedo-state
          */
         $rejected(): this is { $value: undefined };
         /** returns true if this promise is already resolved or rejected
          *
          * calling this inside a derivation will cause the derivation to notice when the promise is settled
          *
-         * note that the value returned is updated by the tracker of leviathan state and might not be true even if the promise is settled
+         * note that the value returned is updated by the tracker of rubedo state and might not be true even if the promise is settled
          *
          * if the value is true that means the promise is settled, but if the value is false, that doesn't mean the promise isn't settled
          *
@@ -624,7 +624,7 @@ declare global {
          *
          * however, because it notifies on change it is completely safe and correct to call this from derivations
          *
-         * the `$` indicates this is a method added by leviathan-state
+         * the `$` indicates this is a method added by rubedo-state
          */
         $settled(): boolean;
         /** if the promise is resolved, returns its value
@@ -635,27 +635,27 @@ declare global {
          *
          * essentially its like an `await` except it returns synchronously if the promise is not settled
          *
-         * the `$` indicates this is a method added by leviathan-state
+         * the `$` indicates this is a method added by rubedo-state
          */
         $now(): this["$value"];
         /** returns the value, or undefined it this promise is not settled or was rejected
          *
          * using this inside a derivation will cause the derivation to notice when the promise is resolved
          *
-         * note that this value is updated by the tracker of leviathan state and might not contain the value even if the promise is resolved
+         * note that this value is updated by the tracker of rubedo state and might not contain the value even if the promise is resolved
          *
          * if the value is here that means the promise is resolved, but if the value isn't here, that doesn't mean the promise isn't resolved
          *
          * however, because it notifies on change it is completely safe and correct to use this from derivations
          *
-         * the `$` indicates this is a property added by leviathan-state
+         * the `$` indicates this is a property added by rubedo-state
          */
         readonly $value: T | undefined;
         /** returns the error, or undefined it this promise is not settled or was resolved
          *
          * using this inside a derivation will cause the derivation to notice when the promise is rejected
          *
-         * note that this value is updated by the tracker of leviathan state and might not contain the value even if the promise is rejected
+         * note that this value is updated by the tracker of rubedo state and might not contain the value even if the promise is rejected
          *
          * if the value is here that means the promise is rejected, but if the value isn't here, that doesn't mean the promise isn't rejected
          *
@@ -663,7 +663,7 @@ declare global {
          *
          * however, because it notifies on change it is completely safe and correct to use this from derivations
          *
-         * the `$` indicates this is a property added by leviathan-state
+         * the `$` indicates this is a property added by rubedo-state
          */
         readonly $error: unknown;
     }

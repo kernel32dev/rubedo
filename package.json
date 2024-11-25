@@ -1,6 +1,6 @@
 {
-    "name": "leviathan-state",
-    "version": "0.0.0",
+    "name": "rubedo",
+    "version": "0.1.0",
     "description": "A state management library, observe changes without a compiler",
     "main": "index.js",
     "types": "index.d.ts",
@@ -16,6 +16,12 @@
     ],
     "author": "kernel32dev",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git://github.com/kernel32dev/rubedo.git"
+    },
+    "bugs": "https://github.com/kernel32dev/rubedo/issues",
+    "homepage": "https://github.com/kernel32dev/rubedo",
     "devDependencies": {
         "@types/jest": "^29.5.13",
         "jest": "^29.7.0",
