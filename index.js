@@ -3,6 +3,8 @@
 
 //#region symbols
 
+// TODO! organize the symbols and don't share them unless necessary
+
 /** the derivations of this object (Derived objects that depend on this), present on all objects that can be depended on such as State and Derived
  *
  * on `State` and `Derived` this is always a `Set<WeakRef<Derived>>`
@@ -239,6 +241,8 @@ const recursiveFrozenComparisonGuard = new WeakSet();
 //#endregion
 //#region Derived
 
+// TODO! add Derived.cheap and Derived.prototype.cheap
+
 const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
     constructor: Derived,
     now() {
@@ -278,16 +282,20 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
 });
 
 Object.defineProperty(DerivedPrototype, Symbol.iterator, {
-    get: {[Symbol.iterator]() {
-        return Symbol.iterator in Object(this()) ? derivedIteratorMethod : undefined;
-    }}[Symbol.iterator],
+    get: {
+        [Symbol.iterator]() {
+            return Symbol.iterator in Object(this()) ? derivedIteratorMethod : undefined;
+        }
+    }[Symbol.iterator],
     enumerable: false,
     configurable: true,
 });
 Object.defineProperty(DerivedPrototype, Symbol.asyncIterator, {
-    get: {[Symbol.asyncIterator]() {
-        return Symbol.asyncIterator in Object(this()) ? derivedAsyncIteratorMethod : undefined;
-    }}[Symbol.asyncIterator],
+    get: {
+        [Symbol.asyncIterator]() {
+            return Symbol.asyncIterator in Object(this()) ? derivedAsyncIteratorMethod : undefined;
+        }
+    }[Symbol.asyncIterator],
     enumerable: false,
     configurable: true,
 });
@@ -613,6 +621,8 @@ State.prototype = StatePrototype;
 //#endregion State
 //#region Effect
 
+// TODO! implement and document what trigger and run do when called from inside the affector
+
 const AffectorPrototype = defineProperties({}, {
     constructor: Effect,
     clear() {
@@ -835,7 +845,7 @@ function track(value) {
     if (!proto || proto == Object.prototype) {
         if (!Object.isExtensible(value)) {
             if (Object.isFrozen(value)) {
-                // TODO! do something about properties that need tracking (warning maybe?)
+                // TODO! wrap the object in a dedicated proxy for frozen objects with untracked properties
                 return value;
             }
             trackNonExtensibleError();
@@ -865,13 +875,14 @@ function track(value) {
                 // hence we would need a call to the track function in the property getter
                 // however, that might be too much of a performance hit, for such a small edge case (string-keyed data properties frozen before the call to track), so we are not doing that for now
                 console.warn(`State.track: Could not wrap with tracking the property with key ${key} of object, because it is not configurable nor writable`);
+                // TODO! wrap the object in a dedicated proxy for objects with untracked properties
             }
         }
         return proxy;
     } else if (proto == Array.prototype && Array.isArray(value)) {
         if (!Object.isExtensible(value)) {
             if (Object.isFrozen(value)) {
-                // TODO! do something about properties that need tracking (warning maybe?)
+                // TODO! wrap the object in a dedicated proxy for frozen objects with untracked properties
                 return value;
             }
             trackNonExtensibleError();
@@ -898,6 +909,7 @@ function track(value) {
                 // hence we would need a call to the track function in the property getter
                 // however, that might be too much of a performance hit, for such a small edge case (string-keyed data properties frozen before the call to track), so we are not doing that for now
                 console.warn(`State.track: Could not wrap with tracking the item at index ${key} of array, because it is not configurable nor writable`);
+                // TODO! wrap the object in a dedicated proxy for objects with untracked properties
             }
         }
         return createStateArray(value, StateArrayPrototype);
@@ -945,6 +957,7 @@ function track(value) {
 }
 
 function trackNonExtensibleError() {
+    // TODO! add a test for this
     throw new TypeError("can't track object that is not extensible");
 }
 
@@ -958,7 +971,7 @@ function freeze(value) {
     if (!proto || proto == Object.prototype) {
         if (!Object.isExtensible(value)) {
             if (Object.isFrozen(value)) {
-                // TODO! do something about properties that need tracking (warning maybe?)
+                // TODO! wrap the object in a dedicated proxy for frozen objects with untracked properties
                 return value;
             }
             trackNonExtensibleError();
@@ -985,13 +998,14 @@ function freeze(value) {
                 // since writable and configurable is false, we can't update the property,
                 // we can't even change the way it is obtained through the proxy to return the correct tracked valued, because there is no proxy for frozen objects
                 console.warn(`State.freeze: Could not wrap with tracking the property with key ${key} of object, because it is not configurable nor writable`);
+                // TODO! wrap the object in a dedicated proxy for objects with untracked properties
             }
         }
         return Object.freeze(value);
     } else if (proto == Array.prototype && Array.isArray(value)) {
         if (!Object.isExtensible(value)) {
             if (Object.isFrozen(value)) {
-                // TODO! do something about properties that need tracking (warning maybe?)
+                // TODO! wrap the object in a dedicated proxy for frozen objects with untracked properties
                 return value;
             }
             trackNonExtensibleError();
@@ -1016,6 +1030,7 @@ function freeze(value) {
                 // since writable and configurable is false, we can't update the property,
                 // we can't even change the way it is obtained through the proxy to return the correct tracked valued, because there is no proxy for frozen objects
                 console.warn(`State.freeze: Could not wrap with tracking the item at index ${key} of array, because it is not configurable nor writable`);
+                // TODO! wrap the object in a dedicated proxy for objects with untracked properties
             }
         }
         return Object.freeze(value);
@@ -1135,6 +1150,8 @@ function isr(a, b) {
 //#endregion
 //#region object
 
+// TODO! add static methods to constructors of state objects, arrays map set and promise
+
 function StateObject() {
     const value = new.target ? this : {};
     const proxy = new Proxy(value, StateObjectProxyHandler);
@@ -1156,7 +1173,7 @@ defineProperties(StateObject, {
         if (!set) ders[sym_all] = set = new Set();
         set.add(current_derived);
         current_derived_used = true;
-    }
+    },
 });
 
 StateObject.prototype = Object.prototype;

@@ -405,19 +405,10 @@ export const State: {
     };
 };
 export namespace State {
-    /** **Summary**: a type alias to define that you expect a State of `T` for you to mutate, but that an immutable `T` or a derivation that returns a `T` is also fine
-     *
-     * this could be used for example as the value attribute of an input,
-     *
-     * use this to express that somewhere accepts derived but also accepts just the plain values for convenience
-     *
-     * interfaces that use this alias can check if the value is an instance of State to perform mutations on it
-     *
-     * this type has the semantics of possibly mutating the value if a State is passed
-     *
-     * although do note that it accepts the exact same values as `Derived.Or`, because `State` is a subtype of `Derived`
-     */
-    type Or<T> = T | Derived<T> | State<T>;
+    type Object = globalThis.Object;
+    type Array<T> = globalThis.Array<T>;
+    type Map<K, V> = globalThis.Map<K, V>;
+    type Set<T> = globalThis.Set<T>;
 }
 
 /** **Summary**: do something on affected objects when the dependencies changes (not lazy)
