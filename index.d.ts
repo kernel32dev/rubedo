@@ -150,7 +150,19 @@ export const Derived: {
     use<T>(value: T | Derived<T>): T;
 
     /** set this property to a function to log when any `WeakRef` created by rubedo is garbage collected */
-    debugLogWeakRefCleanUp: ((message: string) => void) | null,
+    debugLogWeakRefCleanUp: ((message: string) => void) | null;
+
+    /** what to do when a derivation or state is used outside a derivation, default is `allow`
+     *
+     * uses inside of `Derived.now` and calls to the `now` method are always allowed, even though they avoid creating dependencies
+     */
+    onUseDerivedOutsideOfDerivation: "allow" | "throw" | ((message: string) => void);
+
+    /** what to do when a tracked object is used outside a derivation, default is `allow`
+     *
+     * uses inside of `Derived.now` are always allowed, even though they avoid creating dependencies
+     */
+    onUseTrackedOutsideOfDerivation: "allow" | "throw" | ((message: string) => void);
 };
 export namespace Derived {
     /** **Summary**: a type alias to define that you expect some `T` or a derivation that returns a `T`

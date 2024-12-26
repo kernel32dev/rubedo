@@ -185,10 +185,12 @@ const sym_mapfn = Symbol("mapfn");
 
 /** if this value is set, it is the weak ref of the derived currently running at the top of the stack
  *
- * if it is null, it means we are outside a derived
+ * if it is null, it means we are ignoring dependencies
  *
- * @type {WeakRef<Derived> | null} */
-let current_derived = null;
+ * if it is undefined, it means we are outside a derived
+ *
+ * @type {WeakRef<Derived> | null | undefined} */
+let current_derived = undefined;
 
 /** flag that is set everytime the derivation is used
  *
@@ -386,58 +388,62 @@ function Derived(name, derivator) {
     if (!new.target) throw new TypeError("Constructor Derived requires 'new'");
     if (arguments.length == 1) {
         derivator = name;
-        name = "State";
+        name = "Derived";
     }
     if (typeof derivator !== "function") throw new TypeError("Derivator is not a function");
-    name = name === "State" ? derivator.name || name : "" + name;
+    name = name === "Derived" ? derivator.name || name : ("" + name) || "Derived";
     /** @type {Derived} */
-    const Derived = ({
+    const derived = ({
         [name]() {
             // derivator is set to null after the derivator executes without creating dependencies
-            if (!derivator) return Derived[sym_value];
-            //if (current_derived === null) throw new Error("can't call a derived outside of a derivation, use the now method or call this inside a derivation");
+            if (!derivator) return derived[sym_value];
 
+            // add the current derivator as a derivation of myself
             if (current_derived) {
-                // add the current derivator as a derivation of myself
-                Derived[sym_ders].add(current_derived);
+                derived[sym_ders].add(current_derived);
                 current_derived_used = true;
+            } else if (current_derived == undefined) {
+                const penalty = Derived.onUseDerivedOutsideOfDerivation;
+                const msg = derived.name + " used outside of derivation";
+                if (penalty === "throw") throw new Error(msg);
+                if (typeof penalty == "function") penalty(msg);
             }
 
-            const old_weak = Derived[sym_weak];
+            const old_weak = derived[sym_weak];
             if (old_weak) {
-                if (!(sym_value in Derived)) {
+                if (!(sym_value in derived)) {
                     // TODO! add information to help pin down the loop
                     throw new RangeError("Circular dependency between derives detected");
                 }
                 // TODO! somehow ensure this can't cause an infinite recursive loop
-                const pideps = Derived[sym_pideps];
+                const pideps = derived[sym_pideps];
                 // TODO! since recreating the sym_ders link is only needed when revalidating due to an affect (not lazy), do this only when one is involved
                 // (referring to the second argument of the call below)
                 if (!possibleInvalidationIsInvalidated(pideps, old_weak)) {
-                    return Derived[sym_value];
+                    return derived[sym_value];
                 }
                 pideps.clear();
             }
-            const new_weak = new WeakRef(Derived);
+            const new_weak = new WeakRef(derived);
             const old_derived = current_derived;
             const old_derived_used = current_derived_used;
             current_derived = new_weak;
-            const old_value = Derived[sym_value];
+            const old_value = derived[sym_value];
             try {
-                delete Derived[sym_value];
+                delete derived[sym_value];
                 for (let i = 0; i < maximumDerivedRepeats; i++) {
-                    Derived[sym_weak] = new_weak;
+                    derived[sym_weak] = new_weak;
                     current_derived_used = false;
                     const value = track(derivator());
-                    if (Derived[sym_weak]) {
+                    if (derived[sym_weak]) {
                         if (!current_derived_used) derivator = null;
-                        return Derived[sym_value] = value;
+                        return derived[sym_value] = value;
                     }
                 }
                 throw new RangeError("Too many self invalidations");
             } catch (e) {
-                Derived[sym_value] = old_value;
-                Derived[sym_weak] = old_weak;
+                derived[sym_value] = old_value;
+                derived[sym_weak] = old_weak;
                 throw e;
             } finally {
                 current_derived = old_derived;
@@ -445,19 +451,16 @@ function Derived(name, derivator) {
             }
         }
     })[name];
-    Object.setPrototypeOf(Derived, new.target.prototype);
-    Object.defineProperty(Derived, sym_ders, { value: new Set() });
-    Object.defineProperty(Derived, sym_pideps, { value: new Map() });
-    Object.defineProperty(Derived, sym_weak, { writable: true, value: null });
-    Object.defineProperty(Derived, sym_piweak, { writable: true, value: null });
-    return Derived;
+    Object.setPrototypeOf(derived, new.target.prototype);
+    Object.defineProperty(derived, sym_ders, { value: new Set() });
+    Object.defineProperty(derived, sym_pideps, { value: new Map() });
+    Object.defineProperty(derived, sym_weak, { writable: true, value: null });
+    Object.defineProperty(derived, sym_piweak, { writable: true, value: null });
+    return derived;
 }
 
 defineProperties(Derived, {
     now(derivator) {
-        // if (current_derived !== null) throw new Error(current_derived
-        //     ? "can't call method now inside of a derivation, call the derived or call the now method outside a derivation"
-        //     : "can't call method now inside of another call to Derived.now, call the derived or call the now method outside a derivation");
         const old_derived = current_derived;
         const old_derived_used = current_derived_used;
         current_derived = null;
@@ -482,6 +485,8 @@ defineProperties(Derived, {
     use(value) {
         return value instanceof Derived ? value() : track(value);
     },
+    onUseDerivedOutsideOfDerivation: "allow",
+    onUseTrackedOutsideOfDerivation: "allow",
 })
 
 Object.defineProperty(Derived, "debugLogWeakRefCleanUp", {
@@ -525,7 +530,6 @@ Derived.prototype = DerivedPrototype;
 const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
     constructor: State,
     now() {
-        //if (current_derived !== null) throw new Error("can't call method now inside of a derivation, call the state or call the now method outside a derivation");
         return this[sym_value];
     },
     set(value) {
@@ -589,15 +593,18 @@ function State(name, value) {
         value = name;
         name = "State";
     } else {
-        name = "" + name;
+        name = ("" + name) || "State";
     }
     const State = ({
         [name]() {
-            //if (current_derived === null) throw new Error("can't call a state outside of a derivation, use the now method or call this inside a derivation");
             if (current_derived) {
-                // add the current derivator as a derivation of myself
                 State[sym_ders].add(current_derived);
                 current_derived_used = true;
+            } else if (current_derived == undefined) {
+                const penalty = Derived.onUseDerivedOutsideOfDerivation;
+                const msg = State.name + " used outside of derivation";
+                if (penalty === "throw") throw new Error(msg);
+                if (typeof penalty == "function") penalty(msg);
             }
             return State[sym_value];
         }
@@ -829,6 +836,42 @@ function clearAffector(affector) {
 
 //#endregion
 //#region invalidation
+
+/** @param {{add(weak: WeakRef<Derived>): void}} set */
+function useState(set) {
+    if (current_derived) {
+        set.add(current_derived);
+        current_derived_used = true;
+    } else if (current_derived == undefined) {
+        const penalty = Derived.onUseDerivedOutsideOfDerivation;
+        const msg = "State used outside of derivation";
+        if (penalty === "throw") throw new Error(msg);
+        if (typeof penalty == "function") penalty(msg);
+    }
+}
+
+/** @param {{add(weak: WeakRef<Derived>): void}} set */
+function useDerived(set) {
+    if (current_derived) {
+        set.add(current_derived);
+        current_derived_used = true;
+    } else if (current_derived == undefined) {
+        const penalty = Derived.onUseDerivedOutsideOfDerivation;
+        const msg = "Derived used outside of derivation";
+        if (penalty === "throw") throw new Error(msg);
+        if (typeof penalty == "function") penalty(msg);
+    }
+}
+
+function prepareUseTracked() {
+    if (current_derived) return current_derived_used = true;
+    if (current_derived == undefined) {
+        const penalty = Derived.onUseTrackedOutsideOfDerivation;
+        const msg = "Tracked object used outside of derivation";
+        if (penalty === "throw") throw new Error(msg);
+        if (typeof penalty == "function") penalty(msg);
+    }
+}
 
 /** @param {Derived} target @param {boolean} [transitive] */
 function invalidateDerivation(target, transitive) {
@@ -1233,13 +1276,12 @@ defineProperties(StateObject, {
     },
     use(target) {
         if (!target || typeof target !== "object") throw new TypeError("target is not an Object");
-        if (!current_derived) return;
+        if (!prepareUseTracked()) return;
         const ders = target[sym_ders];
         if (!ders) return;
         let set = ders[sym_all];
         if (!set) ders[sym_all] = set = new Set();
         set.add(current_derived);
-        current_derived_used = true;
     },
 });
 
@@ -1327,13 +1369,12 @@ function stateObjectInvalidate(target, key) {
 
 /** @param {string | sym_all} key */
 function stateObjectUse(target, key) {
-    if (!current_derived) return;
+    if (!prepareUseTracked()) return;
     /** @type {Record<string | sym_all, Set<WeakRef<Derived>>>} */
     const ders = target[sym_ders];
     let set = ders[key];
     if (!set) ders[key] = set = new Set();
     set.add(current_derived);
-    current_derived_used = true;
 }
 
 //#endregion
@@ -1424,10 +1465,9 @@ defineProperties(StateArray, {
     },
     use(target) {
         if (!target || typeof target !== "object" || !Array.isArray(target)) throw new TypeError("target is not an Array");
-        if (!current_derived || !(sym_len in target)) return;
+        if (!prepareUseTracked() || !(sym_len in target)) return;
         while (sym_src in target) target = target[sym_src];
         target[sym_all].add(current_derived);
-        current_derived_used = true;
     },
 });
 
@@ -1700,9 +1740,8 @@ const StateArrayProxyHandler = {
     //     return Reflect.isExtensible(target);
     // },
     ownKeys(target) {
-        if (current_derived) {
+        if (prepareUseTracked()) {
             target[sym_all].add(current_derived);
-            current_derived_used = true;
         }
         return Reflect.ownKeys(target);
     },
@@ -1762,14 +1801,15 @@ const StateArrayProxyHandler = {
 
 /** @param {StateArray} target @param {string | symbol} prop   */
 function stateArrayUseProp(target, prop) {
-    if (!current_derived) return;
+    if (current_derived === null) return;
     if (prop === "length") {
-        target[sym_len].add(current_derived);
-        current_derived_used = true;
+        if (prepareUseTracked()) {
+            target[sym_len].add(current_derived);
+        }
         return;
     }
     const index = as_index(prop);
-    if (index === undefined) return;
+    if (index === undefined || !prepareUseTracked()) return;
     const length = target.length;
     if (index < length) {
         let set;
@@ -1786,7 +1826,6 @@ function stateArrayUseProp(target, prop) {
     } else {
         target[sym_len].add(current_derived);
     }
-    current_derived_used = true;
 }
 
 //#region DerivedArray
@@ -1924,12 +1963,11 @@ function derivedMapArrayGet(target, index) {
     if (!cached) {
         const derived_index = Object.setPrototypeOf(function DerivedIndex() {
             const index = slots.indexOf(slot_set);
-            if (current_derived) {
+            if (prepareUseTracked()) {
                 // index should always be less than length, because the length of ders and slots should always be in sync
                 let der_set = ders[index];
                 if (!der_set) ders[index] = der_set = new Set();
                 der_set.add(current_derived);
-                current_derived_used = true;
             }
             return index;
         }, DerivedPrototype);
@@ -2013,11 +2051,10 @@ const StateMapPrototype = defineProperties({ __proto__: Map.prototype }, {
     get(key) {
         /** @type {Map<any, Set<WeakRef<Derived>>>} */
         const ders = this[sym_ders];
-        if (current_derived) {
+        if (prepareUseTracked()) {
             let der_set = ders.get(key);
             if (!der_set) ders.set(key, der_set = new Set());
             der_set.add(current_derived);
-            current_derived_used = true;
         }
         return Map.prototype.get.apply(this, arguments);
     },
@@ -2025,40 +2062,35 @@ const StateMapPrototype = defineProperties({ __proto__: Map.prototype }, {
         // TODO! split sym_ders into two to track presence of key and value of key separately
         /** @type {Map<any, Set<WeakRef<Derived>>>} */
         const ders = this[sym_ders];
-        if (current_derived) {
+        if (prepareUseTracked()) {
             let der_set = ders.get(key);
             if (!der_set) ders.set(key, der_set = new Set());
             der_set.add(current_derived);
-            current_derived_used = true;
         }
         return Map.prototype.has.apply(this, arguments);
     },
     // read-all
     entries() {
-        if (current_derived) {
+        if (prepareUseTracked()) {
             this[sym_all].add(current_derived);
-            current_derived_used = true;
         }
         return Map.prototype.entries.apply(this, arguments);
     },
     values() {
-        if (current_derived) {
+        if (prepareUseTracked()) {
             this[sym_all].add(current_derived);
-            current_derived_used = true;
         }
         return Map.prototype.values.apply(this, arguments);
     },
     keys() {
-        if (current_derived) {
+        if (prepareUseTracked()) {
             this[sym_all].add(current_derived);
-            current_derived_used = true;
         }
         return Map.prototype.keys.apply(this, arguments);
     },
     forEach() {
-        if (current_derived) {
+        if (prepareUseTracked()) {
             this[sym_all].add(current_derived);
-            current_derived_used = true;
         }
         return Map.prototype.forEach.apply(this, arguments);
     },
@@ -2110,9 +2142,8 @@ const StateMapPrototype = defineProperties({ __proto__: Map.prototype }, {
 
 Object.defineProperty(StateMapPrototype, "size", {
     get() {
-        if (current_derived) {
+        if (prepareUseTracked()) {
             this[sym_len].add(current_derived);
-            current_derived_used = true;
         }
         return nativeMapSizeGetter.call(this);
     },
@@ -2138,11 +2169,10 @@ StateMap.prototype = StateMapPrototype;
 defineProperties(StateMap, {
     use(target) {
         if (!(target instanceof Map)) throw new TypeError("target is not a Map");
-        if (current_derived) {
+        if (prepareUseTracked()) {
             const all = target[sym_all];
             if (all) {
                 all.add(current_derived);
-                current_derived_used = true;
             }
         }
     },
@@ -2158,40 +2188,35 @@ const StateSetPrototype = defineProperties({ __proto__: Set.prototype }, {
     has(value) {
         /** @type {Map<any, Set<WeakRef<Derived>>>} */
         const ders = this[sym_ders];
-        if (current_derived) {
+        if (prepareUseTracked()) {
             let der_set = ders.get(value);
             if (!der_set) ders.set(value, der_set = new Set());
             der_set.add(current_derived);
-            current_derived_used = true;
         }
         return Set.prototype.has.call(this, value);
     },
     // read-all
     entries() {
-        if (current_derived) {
+        if (prepareUseTracked()) {
             this[sym_all].add(current_derived);
-            current_derived_used = true;
         }
         return Set.prototype.entries.call(this);
     },
     values() {
-        if (current_derived) {
+        if (prepareUseTracked()) {
             this[sym_all].add(current_derived);
-            current_derived_used = true;
         }
         return Set.prototype.values.call(this);
     },
     keys() {
-        if (current_derived) {
+        if (prepareUseTracked()) {
             this[sym_all].add(current_derived);
-            current_derived_used = true;
         }
         return Set.prototype.keys.call(this);
     },
     forEach() {
-        if (current_derived) {
+        if (prepareUseTracked()) {
             this[sym_all].add(current_derived);
-            current_derived_used = true;
         }
         return Set.prototype.forEach.apply(this, arguments);
     },
@@ -2234,9 +2259,8 @@ const StateSetPrototype = defineProperties({ __proto__: Set.prototype }, {
 
 Object.defineProperty(StateSetPrototype, "size", {
     get() {
-        if (current_derived) {
+        if (prepareUseTracked()) {
             this[sym_all].add(current_derived);
-            current_derived_used = true;
         }
         return nativeSetSizeGetter.call(this);
     },
@@ -2261,11 +2285,10 @@ StateSet.prototype = StateSetPrototype;
 defineProperties(StateSet, {
     use(target) {
         if (!(target instanceof Set)) throw new TypeError("target is not a Set");
-        if (current_derived) {
+        if (prepareUseTracked()) {
             const all = target[sym_all];
             if (all) {
                 all.add(current_derived);
-                current_derived_used = true;
             }
         }
     },
@@ -2330,7 +2353,7 @@ Object.defineProperty(Promise.prototype, "$error", {
 });
 
 function promiseUseSetBySymbol(promise, sym) {
-    if (current_derived) {
+    if (prepareUseTracked()) {
         let set = promise[sym];
         if (!set) {
             set = new Set();
@@ -2342,7 +2365,6 @@ function promiseUseSetBySymbol(promise, sym) {
             });
         }
         set.add(current_derived);
-        current_derived_used = true;
     } else {
         track(promise);
     }

@@ -536,6 +536,47 @@ if (false) describe("derivation region guards", () => {
     });
 });
 
+describe("use outside of derivation checks", () => {
+    test("use derived with callback handler", () => {
+        try {
+            const callback = jest.fn();
+            Derived.onUseDerivedOutsideOfDerivation = callback;
+            expect(callback).toHaveBeenCalledTimes(0);
+            const state = new State(false);
+            expect(callback).toHaveBeenCalledTimes(0);
+            state.mut(x => !x);
+            expect(callback).toHaveBeenCalledTimes(0);
+            void state();
+            expect(callback).toHaveBeenCalledTimes(1);
+            state.now();
+            expect(callback).toHaveBeenCalledTimes(1);
+            Derived.now(() => state.now());
+            expect(callback).toHaveBeenCalledTimes(1);
+            Derived.onUseDerivedOutsideOfDerivation = "allow";
+            void state();
+            expect(callback).toHaveBeenCalledTimes(1);
+        } finally {
+            Derived.onUseDerivedOutsideOfDerivation = "allow";
+        }
+    });
+    test("use derived with \"throw\" handler", () => {
+        try {
+            Derived.onUseDerivedOutsideOfDerivation = "throw";
+            const state = new State(false);
+            state.mut(x => !x);
+            expect(() => {
+                void state();
+            }).toThrow();
+            state.now();
+            Derived.now(() => state.now());
+            Derived.onUseDerivedOutsideOfDerivation = "allow";
+            void state();
+        } finally {
+            Derived.onUseDerivedOutsideOfDerivation = "allow";
+        }
+    });
+});
+
 describe("effect", () => {
     test("affecting on State changes", async () => {
         const effects: number[] = [];
