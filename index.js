@@ -192,9 +192,7 @@ let current_derived = null;
 
 /** flag that is set everytime the derivation is used
  *
- * useful to detect when a derivation has no dependencies
- *
- * TODO! now that derived does not clear itself, current_derived_used is not used, find another use for it or delete it
+ * used to turn a derivation with dependencies into a const derivator
  */
 let current_derived_used = true;
 
@@ -395,6 +393,8 @@ function Derived(name, derivator) {
     /** @type {Derived} */
     const Derived = ({
         [name]() {
+            // derivator is set to null after the derivator executes without creating dependencies
+            if (!derivator) return Derived[sym_value];
             //if (current_derived === null) throw new Error("can't call a derived outside of a derivation, use the now method or call this inside a derivation");
 
             if (current_derived) {
@@ -427,8 +427,12 @@ function Derived(name, derivator) {
                 delete Derived[sym_value];
                 for (let i = 0; i < maximumDerivedRepeats; i++) {
                     Derived[sym_weak] = new_weak;
+                    current_derived_used = false;
                     const value = track(derivator());
-                    if (Derived[sym_weak]) return Derived[sym_value] = value;
+                    if (Derived[sym_weak]) {
+                        if (!current_derived_used) derivator = null;
+                        return Derived[sym_value] = value;
+                    }
                 }
                 throw new RangeError("Too many self invalidations");
             } catch (e) {
