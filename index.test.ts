@@ -536,7 +536,7 @@ if (false) describe("derivation region guards", () => {
     });
 });
 
-describe("affect", () => {
+describe("effect", () => {
     test("affecting on State changes", async () => {
         const effects: number[] = [];
         const state = new State(0);
@@ -602,6 +602,19 @@ describe("affect", () => {
         await microtask;
         expect(trigger()).toBe(200);
         expect(affected()).toBe("100");
+    });
+    test("initializing is set to false on completion", async () => {
+        const affected = [] as boolean[];
+        const effect = new Effect(affected, affector => {
+            affected.push(affector.initializing);
+        });
+        expect(affected).toEqual([]);
+        await microtask;
+        expect(affected).toEqual([true]);
+        effect.trigger();
+        expect(affected).toEqual([true]);
+        await microtask;
+        expect(affected).toEqual([true, false]);
     });
 });
 
@@ -829,18 +842,6 @@ describe("tracked promise", () => {
         expect(() => now()).toThrow("reason");
     });
 });
-
-const a = new State<null | {
-    toString(): "teste";
-}>({
-    toString() {
-        return "teste";
-    }
-});
-const b = a.toString();
-
-const a2 = new State<null | Number>(new Number(3));
-const b2 = a2.valueOf();
 
 describe("tracked map", () => {
     test("derivation notice changes in tracked Map made with track", () => {

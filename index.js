@@ -673,8 +673,23 @@ const AffectorPrototype = defineProperties({}, {
         try {
             this[sym_affect]();
         } finally {
+            if (this.initializing) Object.defineProperty(this, "initializing", { value: false });
             if (this[sym_affect_task] !== undefined) {
-                clearAffector(this);
+                this[sym_affect_task] = undefined;
+                this[sym_pideps].clear();
+                const refs = this[sym_affect_refs];
+                if (refs) {
+                    for (const i of refs) {
+                        /** @type {Set | undefined} */
+                        const set = affectFunctionsWeakRefs.get(i);
+                        if (set && set.delete(this) && set.size == 0) {
+                            affectFunctionsWeakRefs.delete(i);
+                        }
+                    }
+                    refs.clear();
+                } else {
+                    affectFunctionsRefs.delete(this);
+                }
             }
         }
     },
@@ -682,13 +697,21 @@ const AffectorPrototype = defineProperties({}, {
         const affect_task = this[sym_affect_task];
         if (affect_task !== undefined) {
             this[sym_affect_task] = false;
-            if (affect_task) queueMicrotask(this[sym_affect]);
+            if (affect_task === null) queueMicrotask(this[sym_affect]);
         }
     },
     run() {
         if (this[sym_affect_task] !== undefined) {
             this[sym_affect_task] = false;
-            this[sym_affect]();
+            if (this.initializing) {
+                try {
+                    this[sym_affect]();
+                } finally {
+                    Object.defineProperty(this, "initializing", { value: false });
+                }
+            } else {
+                this[sym_affect]();
+            }
         }
     },
 });
@@ -772,10 +795,12 @@ function createAffector(name, affector, prototype) {
             } finally {
                 current_derived = old_derived;
                 current_derived_used = old_derived_used;
+                if (obj.initializing) Object.defineProperty(obj, "initializing", { value: false });
             }
         }
     }[name];
     Object.defineProperty(obj, "name", { value: name });
+    Object.defineProperty(obj, "initializing", { writable: true, value: true });
     Object.defineProperty(obj, sym_pideps, { value: new Map() });
     Object.defineProperty(obj, sym_weak, { value: weak });
     Object.defineProperty(obj, sym_affect, { value: affect });

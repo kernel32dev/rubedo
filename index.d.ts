@@ -511,16 +511,45 @@ export interface Effect {
      * does nothing if the affector was already cleared
      */
     run(): void;
+    /** **Summary**: check if this is the first time the affector is running
+     *
+     * useful to avoid performing side effects on the first execution
+     *
+     * but be careful not to also avoid creating the dependencies! if the effect doesn't call any derivations or states on the first call, it won't run again when those derivations change
+     *
+     * example:
+     *
+     * ```
+     * const flag = new State(false);
+     *
+     * // incorrect, effect will never notice the flag changing
+     * new Effect(console, effect => {
+     *     if (effect.initializing) return;
+     *     if (flag()) console.log("flag was set! (will never run)");
+     * });
+     *
+     * // correct, dependencies are read, but effects are avoided on the first run
+     * new Effect(console, effect => {
+     *     if (flag()) {
+     *         if (effect.initializing) return;
+     *         console.log("flag was set!");
+     *     }
+     * });
+     * ```
+     *
+     * **Reference**: true if the first call to the affector has not yet completed and is not cleared
+     */
+    readonly initializing: boolean;
     /** true if this affector has not yet been cleared */
     readonly active: boolean;
     /** the name specified when creating this object */
     readonly name: string;
 }
 export const Effect: {
-    new(affected: WeakKey, affector: (affector: Effect) => void): Effect;
-    new(...args: [WeakKey, ...WeakKey[], (affector: Effect) => void]): Effect;
-    new(name: string, affected: WeakKey, affector: (affector: Effect) => void): Effect;
-    new(name: string, ...args: [WeakKey, ...WeakKey[], (affector: Effect) => void]): Effect;
+    new(affected: WeakKey, affector: (effect: Effect) => void): Effect;
+    new(...args: [WeakKey, ...WeakKey[], (effect: Effect) => void]): Effect;
+    new(name: string, affected: WeakKey, affector: (effect: Effect) => void): Effect;
+    new(name: string, ...args: [WeakKey, ...WeakKey[], (effect: Effect) => void]): Effect;
     prototype: Effect;
 
     /** **Summary**: creates an affector that may affect anything, not calling clear on this **is** a memory leak
@@ -528,8 +557,8 @@ export const Effect: {
      * see the constructor for more information
      */
     Persistent: {
-        new(affector: (affector: Effect) => void): Effect;
-        new(name: string, affector: (affector: Effect) => void): Effect;
+        new(affector: (effect: Effect) => void): Effect;
+        new(name: string, affector: (effect: Effect) => void): Effect;
     };
 
     /** **Summary**: creates an affector that may be garbage collected, making it your responsibility to ensure it does not get garbage collected
@@ -537,8 +566,8 @@ export const Effect: {
      * see the constructor for more information
      */
     Weak: {
-        new(affector: (affector: Effect) => void): Effect;
-        new(name: string, affector: (affector: Effect) => void): Effect;
+        new(affector: (effect: Effect) => void): Effect;
+        new(name: string, affector: (effect: Effect) => void): Effect;
     };
 };
 
