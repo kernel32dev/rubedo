@@ -32,6 +32,29 @@ export interface Derived<out T> {
      */
     derive<U>(derivator: (value: T) => U): Derived<U>;
 
+    /** **Summary**: get a derived with the value of a property of the object stored
+     *
+     * `a.view("b")` is equivalent to `a.derive(x => x.b)`
+     */
+    view<K extends keyof T>(key: K): Derived<T[K]>;
+
+    /** **Summary**: shorthand for `this.derive(x => x ? "yes" : "no")` */
+    choose<Truthy, Falsy>(truthy: Truthy, falsy: Falsy): Derived<Truthy | Falsy>;
+
+    /** **Summary**: shorthand for `this.derive(x => x && then)` */
+    and<Then>(then: Then): Derived<Then | (T & (false | null | undefined | 0 | ""))>;
+
+    /** **Summary**: shorthand for `this.derive(x => x || else_)` */
+    or<Else>(else_: Else): Derived<Else | Exclude<T, (false | null | undefined | 0 | "")>>;
+
+    /** **Summary**: shorthand for `this.derive(x => x === null || x === undefined ? else_ : x)` */
+    coalesce<Else>(else_: Else): Derived<Else | (T & {})>;
+
+    /** **Summary**: like the derive method, but null and undefined are preserved, and not passed to the function provided
+     *
+     * shorthand for `this.derive(x => x === null || x === undefined ? x : fmap(x))` */
+    fmap<U>(fmap: (value: T & {}) => U): Derived<U | (T & (null | undefined))>;
+
     /** the name specified when creating this object */
     readonly name: string;
 

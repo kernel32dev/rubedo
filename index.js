@@ -262,6 +262,44 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
             return derivator(derived());
         });
     },
+    view(key) {
+        const derived = this;
+        return new Derived(function view() {
+            return derived()[key];
+        });
+    },
+    choose(truthy, falsy) {
+        const derived = this;
+        return new Derived(function choose() {
+            return derived() ? truthy : falsy;
+        });
+    },
+    and(then) {
+        const derived = this;
+        return new Derived(function and() {
+            return derived() && then;
+        });
+    },
+    or(else_) {
+        const derived = this;
+        return new Derived(function or() {
+            return derived() || else_;
+        });
+    },
+    coalesce(else_) {
+        const derived = this;
+        return new Derived(function coalesce() {
+            const value = derived();
+            return value === null || value === undefined ? else_ : value;
+        });
+    },
+    fmap(fmap) {
+        const derived = this;
+        return new Derived(function fmap() {
+            const value = derived();
+            return value === null || value === undefined ? value : fmap(value);
+        });
+    },
     valueOf() {
         const value = this();
         return value === null || value === undefined ? value : value.valueOf();
@@ -2250,7 +2288,7 @@ Object.defineProperty(Promise.prototype, "$value", {
         if (!(sym_rejected in this)) promiseUseSetBySymbol(this, sym_ders_resolved);
     },
     enumerable: false,
-    configurable: false,
+    configurable: true,
 });
 
 Object.defineProperty(Promise.prototype, "$error", {
@@ -2259,7 +2297,7 @@ Object.defineProperty(Promise.prototype, "$error", {
         if (!(sym_resolved in this)) promiseUseSetBySymbol(this, sym_ders_rejected);
     },
     enumerable: false,
-    configurable: false,
+    configurable: true,
 });
 
 function promiseUseSetBySymbol(promise, sym) {
