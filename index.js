@@ -1202,6 +1202,7 @@ function is(a, b) {
 }
 
 function isr(a, b) {
+    // TODO! check if it has the same getters and setters
     if (Object.is(a, b)) return true;
     if (typeof a != "object" || typeof b != "object" || !a || !b) return false;
     let descriptors_a, descriptors_b;
@@ -1315,7 +1316,7 @@ const StateObjectProxyHandler = {
     get(target, p, receiver) {
         if (typeof p == "string") {
             const d = Reflect.getOwnPropertyDescriptor(target, p);
-            if ((!d && Object.isExtensible(target)) || ("value" in d && (d.writable || d.configurable))) {
+            if (d ? ("value" in d && (d.writable || d.configurable)) : Object.isExtensible(target)) {
                 stateObjectUse(target, p);
             }
             // the line below fixes the problem outlined in the track function
@@ -1326,7 +1327,7 @@ const StateObjectProxyHandler = {
     },
     getOwnPropertyDescriptor(target, p) {
         const d = Reflect.getOwnPropertyDescriptor(target, p);
-        if (typeof p == "string" && ((!d && Object.isExtensible(target)) || ("value" in d && (d.writable || d.configurable)))) {
+        if (typeof p == "string" && (d ? ("value" in d && (d.writable || d.configurable)) : Object.isExtensible(target))) {
             stateObjectUse(target, p);
         }
         return d;
