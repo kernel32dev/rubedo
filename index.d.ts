@@ -30,30 +30,30 @@ export interface Derived<out T> {
      *
      * `a.derive(x => f(x))` is equivalent to `new Derived(() => f(a()))`
      */
-    derive<U>(derivator: (value: T) => U): Derived<U>;
+    derive<U>(derivator: (value: T) => U): Derived<Derived.Use<U>>;
 
     /** **Summary**: get a derived with the value of a property of the object stored
      *
-     * `a.view("b")` is equivalent to `a.derive(x => x.b)`
+     * `a.prop("b")` is equivalent to `a.derive(x => x["b"])`
      */
-    view<K extends keyof T>(key: K): Derived<T[K]>;
+    prop<K extends keyof T>(key: K): Derived<Derived.Use<T[K]>>;
 
-    /** **Summary**: shorthand for `this.derive(x => x ? "yes" : "no")` */
-    choose<Truthy, Falsy>(truthy: Truthy, falsy: Falsy): Derived<Truthy | Falsy>;
+    /** **Summary**: shorthand for `this.derive(x => x ? truthy : falsy)` */
+    choose<Truthy, Falsy>(truthy: Truthy, falsy: Falsy): Derived<Derived.Use<Truthy | Falsy>>;
 
     /** **Summary**: shorthand for `this.derive(x => x && then)` */
-    and<Then>(then: Then): Derived<Then | (T & (false | null | undefined | 0 | ""))>;
+    and<Then>(then: Then): Derived<Derived.Use<Then | (T & (false | null | undefined | 0 | ""))>>;
 
     /** **Summary**: shorthand for `this.derive(x => x || else_)` */
-    or<Else>(else_: Else): Derived<Else | Exclude<T, (false | null | undefined | 0 | "")>>;
+    or<Else>(else_: Else): Derived<Derived.Use<Else | Exclude<T, (false | null | undefined | 0 | "")>>>;
 
     /** **Summary**: shorthand for `this.derive(x => x === null || x === undefined ? else_ : x)` */
-    coalesce<Else>(else_: Else): Derived<Else | (T & {})>;
+    coalesce<Else>(else_: Else): Derived<Derived.Use<Else | (T & {})>>;
 
     /** **Summary**: like the derive method, but null and undefined are preserved, and not passed to the function provided
      *
      * shorthand for `this.derive(x => x === null || x === undefined ? x : fmap(x))` */
-    fmap<U>(fmap: (value: T & {}) => U): Derived<U | (T & (null | undefined))>;
+    fmap<U>(fmap: (value: T & {}) => U): Derived<Derived.Use<U | (T & (null | undefined))>>;
 
     /** the name specified when creating this object */
     readonly name: string;
@@ -72,7 +72,7 @@ export interface Derived<out T> {
      *
      * if the `valueOf` property is not present or not a function then a type error will be thrown
      */
-    valueOf(): (T extends { valueOf(): infer U } ? U : never) | (T & (null | undefined));
+    valueOf(): T extends { valueOf(): infer V; } ? V : never;
 
     /** **Summary**: calls the `toString` method of the value inside, forwarding the arguments
      *
@@ -84,14 +84,11 @@ export interface Derived<out T> {
      *
      * calls `this`, if the resulting value is null or undefined returns them cast to string,
      *
-     * otherwise calls the `toString` method on the value forwarding the arguments, the return value is returned
+     * otherwise calls the `toString` method on the value forwarding the arguments, the return value is converted to a string and returned
      *
      * if the `toString` property is not present or not a function then a type error will be thrown
      */
-    toString(...args: T extends { toString(...args: infer U): any } ? U : []):
-        (T extends { toString(...args: any[]): infer U } ? U : never)
-        | ((T & null) extends never ? never : "null")
-        | ((T & undefined) extends never ? never : "undefined");
+    toString(...args: T extends { toString(...args: infer U): any } ? U : []): string;
 
     /** **Summary**: calls the `toLocaleString` method of the value inside, forwarding the arguments
      *
@@ -103,14 +100,11 @@ export interface Derived<out T> {
      *
      * calls `this`, if the resulting value is null or undefined returns them cast to string,
      *
-     * otherwise calls the `toLocaleString` method on the value forwarding the arguments, the return value is returned
+     * otherwise calls the `toLocaleString` method on the value forwarding the arguments, the return value is converted to a string and returned
      *
      * if the `toLocaleString` property is not present or not a function then a type error will be thrown
      */
-    toLocaleString(...args: T extends { toLocaleString(...args: infer U): any } ? U : []):
-        (T extends { toLocaleString(...args: any[]): infer U } ? U : never)
-        | ((T & null) extends never ? never : "null")
-        | ((T & undefined) extends never ? never : "undefined");
+    toLocaleString(...args: T extends { toLocaleString(...args: infer U): any } ? U : []): string;
 
     /** **Summary**: allows you to pass derivations to `JSON.stringify`
      *
@@ -121,8 +115,8 @@ export interface Derived<out T> {
     [Symbol.iterator](): T extends { [Symbol.iterator](): infer U } ? U : undefined;
 }
 export const Derived: {
-    new <T>(derivator: () => T): Derived<T>;
-    new <T>(name: string, derivator: () => T): Derived<T>;
+    new <T>(derivator: () => T): Derived<Derived.Use<T>>;
+    new <T>(name: string, derivator: () => T): Derived<Derived.Use<T>>;
     prototype: Derived<any>,
 
     /** **Summary**: runs a block of code without creating dependencies
@@ -131,7 +125,7 @@ export const Derived: {
      *
      * but that code is only meant to run in response to something and therefore not actually meant to create the dependencies
      */
-    now<T>(derivator: () => T): T;
+    now<T>(derivator: () => T): Derived.Use<T>;
 
     /** **Summary**: turns values that may or may not be wrapped in Derived into always wrapped in Derived
      *
@@ -139,15 +133,33 @@ export const Derived: {
      *
      * **Reference**: if you pass an instance of `Derived`, return it, otherwise, wrap it in a `Derived` that will never change
      */
-    from<T>(value: T | Derived<T>): Derived<T>;
+    from<T>(value: T): Derived<Derived.Use<T>>;
 
     /** **Summary**: turns values that may or may not be wrapped in Derived into always plain values
      *
      * useful to work with `T | Derived<T>` or `Derived.Or<T>` types
      *
-     * **Reference**: returns value, but if you pass an instance of `Derived`, call it
+     * **Reference**: while value is an instance of `Derived`, calls it, then returns value
      */
-    use<T>(value: T | Derived<T>): T;
+    use<T>(value: T): Derived.Use<T>;
+
+    /** **Summary**: creates a derived that gives a view into a property of an object
+     *
+     * useful for passing a property where a derived is expected
+     *
+     * **Reference**: returns a new cheap derivation that when called gets the specified key from the target
+     */
+    prop<T extends object, K extends keyof T>(target: T, key: K): Derived<Derived.Use<T[K]>>;
+    prop<T extends object, K extends keyof T>(name: string, target: T, key: K): Derived<Derived.Use<T[K]>>;
+
+    /** **Summary**: creates a derived without memoization
+     *
+     * as the name suggests this is for times when the derivator is cheap to run, and memoization would just be wasting time and memory
+     *
+     * **Reference**: creates an instance of derived that when called, calls derivator and passes it throug `Derived.use` before returning the value
+     */
+    cheap<T>(derivator: () => T): Derived<Derived.Use<T>>;
+    cheap<T>(name: string, derivator: () => T): Derived<Derived.Use<T>>;
 
     /** set this property to a function to log when any `WeakRef` created by rubedo is garbage collected */
     debugLogWeakRefCleanUp: ((message: string) => void) | null;
@@ -171,11 +183,16 @@ export namespace Derived {
      *
      * interfaces that use this alias should **not** check if the value is an instance of State to perform mutations on it
      *
-     * this type has the semantics of not mutating the value
+     * this type alias has the semantics of not mutating the value
      *
      * although do note that it accepts the exact same values as `Derived.Or`, because `State` is a subtype of `Derived`
+     *
+     * is is safe to pass a `Derived` to Or, in which case it won't do anything
      */
-    type Or<T> = T | Derived<T>;
+    type Or<T> = T extends Derived<infer U> ? T : Derived<T>;
+
+    /** **Summary**: a recursive type alias to help you turn `T`, `Derived<T>` or `Derived<Derived<T>>` into `T` */
+    type Use<T> = T extends Derived<infer U> ? Use<U> : T;
 }
 
 /** **Summary**: hold a single mutable value
@@ -334,20 +351,20 @@ export const State: {
      * const username_input = create_input(my_state.username); // wrong, not passing it "by reference"
      * ```
      *
-     * view allows you to create a state that when read, it reads from your property, and when it is written to, it writes to your property
+     * prop allows you to create a state that when read, it reads from your property, and when it is written to, it writes to your property
      *
      * allowing you to pass properties "by reference"
      *
      * ```
-     * const username_input = create_input(State.view(my_state, "username")); // correct, passing it "by reference"
+     * const username_input = create_input(State.prop(my_state, "username")); // correct, passing it "by reference"
      * ```
      *
      * **Reference**: creates a State object that when called reads the property,
      * calls to the set method sets the property,
      * and calls to mut, reads the property inside of `Derived.now` and the new value sets the property
      */
-    view<T extends object, K extends keyof T>(target: T, key: K): State<T[K]>;
-    view<T extends object, K extends keyof T>(name: string, target: T, key: K): State<T[K]>;
+    prop<T extends object, K extends keyof T>(target: T, key: K): State<T[K]>;
+    prop<T extends object, K extends keyof T>(name: string, target: T, key: K): State<T[K]>;
 
     /** **Summary**: create a proxy state, that gives you full control over how the value is read and written
      *

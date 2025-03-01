@@ -103,6 +103,13 @@ describe("State and Derived with caching and invalidation", () => {
         });
         expect(derived()).toBe(10);
     });
+    test("Derived resolves returned derivations recursively", () => {
+        const derived0 = new Derived(() => 10 as const);
+        const derived1 = new Derived(() => derived0);
+        const derived2 = new Derived(() => new Derived(() => new Derived(() => derived1)));
+        const derived3 = new Derived(() => new Derived(() => derived2));
+        expect(derived3()).toBe(10);
+    });
 });
 
 describe("Derivation memoized (possibly invalidated mechanism)", () => {
@@ -280,15 +287,15 @@ describe("Derivation memoized (possibly invalidated mechanism)", () => {
 });
 
 describe("special State objects", () => {
-    describe("State.view", () => {
-        test("State.view should create a state view for an object's property", () => {
+    describe("State.prop", () => {
+        test("State.prop should create a state view for an object's property", () => {
             const target = {
                 username: "initial_user",
                 password: "initial_pass"
             };
 
             // Create a view state for the username property
-            const usernameState = State.view(target, "username");
+            const usernameState = State.prop(target, "username");
 
             // Check that it reads the correct initial value
             expect(usernameState()).toBe("initial_user");
@@ -301,14 +308,14 @@ describe("special State objects", () => {
             target.username = "direct_update";
             expect(usernameState()).toBe("direct_update");
         });
-        test("State.view should only affect the specified property", () => {
+        test("State.prop should only affect the specified property", () => {
             const target = {
                 username: "user",
                 email: "user@example.com"
             };
 
             // Create a view state for the username property
-            const usernameState = State.view(target, "username");
+            const usernameState = State.prop(target, "username");
 
             // Modify the view state
             usernameState.set("new_user");
@@ -365,7 +372,7 @@ describe("special State objects", () => {
     });
 });
 
-describe("Derived static helpers", () => {
+describe("Derived static functions", () => {
     test("Derived.from with value", () => {
         const derived = Derived.from(3);
         expect(derived()).toBe(3);
@@ -388,6 +395,27 @@ describe("Derived static helpers", () => {
             expect(derived).toBe(3);
         });
     });
+    test("Derived.prop", () => {
+        Derived.now(() => {
+            const tracked = State.track({key: 1});
+            const derived = Derived.prop(tracked, "key");
+            expect(derived()).toBe(1);
+            tracked.key = 2;
+            expect(derived()).toBe(2);
+        });
+    });
+    test("Derived.cheap", () => {
+        Derived.now(() => {
+            const tracked = State.track({key: 1});
+            const derivator = jest.fn(() => tracked.key);
+            const derived = Derived.cheap(derivator);
+            expect(derived()).toBe(1);
+            tracked.key = 2;
+            expect(derived()).toBe(2);
+            expect(derived()).toBe(2);
+            expect(derivator).toHaveBeenCalledTimes(3);
+        });
+    });
 });
 
 describe("Derived forwarding methods", () => {
@@ -398,14 +426,14 @@ describe("Derived forwarding methods", () => {
         expect(Derived.from(undefined).valueOf()).toBe(undefined);
     });
     test("toString", () => {
-        const ref = {};
-        expect(Derived.from({toString() { return ref; }}).toString()).toBe(ref);
+        expect(Derived.from(2).toString()).toBe((2).toString());
+        expect(Derived.from({toString() { return 2; }}).toString()).toBe("" + 2);
         expect(Derived.from(null).toString()).toBe("null");
         expect(Derived.from(undefined).toString()).toBe("undefined");
     });
     test("toLocaleString", () => {
-        const ref = {};
-        expect(Derived.from({toLocaleString() { return ref; }}).toLocaleString()).toBe(ref);
+        expect(Derived.from(2).toLocaleString()).toBe((2).toLocaleString());
+        expect(Derived.from({toLocaleString() { return 2; }}).toLocaleString()).toBe("" + 2);
         expect(Derived.from(null).toLocaleString()).toBe("null");
         expect(Derived.from(undefined).toLocaleString()).toBe("undefined");
     });

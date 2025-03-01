@@ -262,9 +262,9 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
             return derivator(derived());
         });
     },
-    view(key) {
+    prop(key) {
         const derived = this;
-        return new Derived(function view() {
+        return new Derived(function prop() {
             return derived()[key];
         });
     },
@@ -306,11 +306,11 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
     },
     toString() {
         const value = this();
-        return value === null ? "null" : value === undefined ? "undefined" : value.toString.apply(value, arguments);
+        return value === null ? "null" : value === undefined ? "undefined" : "" + value.toString.apply(value, arguments);
     },
     toLocaleString() {
         const value = this();
-        return value === null ? "null" : value === undefined ? "undefined" : value.toLocaleString.apply(value, arguments);
+        return value === null ? "null" : value === undefined ? "undefined" : "" + value.toLocaleString.apply(value, arguments);
     },
     toJSON() {
         const value = this();
@@ -434,13 +434,16 @@ function Derived(name, derivator) {
                 for (let i = 0; i < maximumDerivedRepeats; i++) {
                     derived[sym_weak] = new_weak;
                     current_derived_used = false;
-                    const value = track(derivator());
+                    let value = track(derivator());
+                    while (derived[sym_weak] && value instanceof Derived) {
+                        value = value();
+                    }
                     if (derived[sym_weak]) {
                         if (!current_derived_used) derivator = null;
                         return derived[sym_value] = value;
                     }
                 }
-                throw new RangeError("Too many self invalidations");
+                throw new RangeError("Too many recursive derivation invalidations");
             } catch (e) {
                 derived[sym_value] = old_value;
                 derived[sym_weak] = old_weak;
@@ -465,7 +468,9 @@ defineProperties(Derived, {
         const old_derived_used = current_derived_used;
         current_derived = null;
         try {
-            return derivator();
+            let value = derivator();
+            while (value instanceof Derived) value = value();
+            return value;
         } finally {
             current_derived = old_derived;
             current_derived_used = old_derived_used;
@@ -474,16 +479,43 @@ defineProperties(Derived, {
     from(value) {
         if (value instanceof Derived) return value;
         value = track(value);
-        const derived = function Derived() { return value; };
-        Object.setPrototypeOf(derived, DerivedPrototype);
-        Object.defineProperty(derived, sym_ders, { value: new Set() });
-        Object.defineProperty(derived, sym_pideps, { value: new Map() });
-        Object.defineProperty(derived, sym_weak, { value: new WeakRef(derived) });
-        Object.defineProperty(Derived, sym_piweak, { value: null });
-        return derived;
+        return Object.setPrototypeOf(function Derived() { return value; }, DerivedPrototype);
     },
     use(value) {
-        return value instanceof Derived ? value() : track(value);
+        while (value instanceof Derived) value = value();
+        return track(value);
+    },
+    prop(name, target, prop) {
+        if (arguments.length == 2) {
+            prop = target;
+            target = name;
+            name = "PropDerived";
+        }
+        if (typeof prop != "string" && typeof prop != "number" && typeof prop != "symbol") throw new TypeError("prop is not a string, number or symbol");
+        if (typeof target !== "object" || !target) throw new TypeError("Derivator is not a function");
+        name = name === "PropDerived" ? (typeof prop == "symbol" ? prop.description || "symbol" : "" + prop) || name : ("" + name) || "PropDerived";
+        return Object.setPrototypeOf({
+            [name]() {
+                let value = target[prop];
+                while (value instanceof Derived) value = value();
+                return value;
+            }
+        }[name], DerivedPrototype);
+    },
+    cheap(name, derivator) {
+        if (arguments.length == 1) {
+            derivator = name;
+            name = "CheapDerived";
+        }
+        if (typeof derivator !== "function") throw new TypeError("Derivator is not a function");
+        name = name === "CheapDerived" ? derivator.name || name : ("" + name) || "CheapDerived";
+        return Object.setPrototypeOf({
+            [name]() {
+                let value = derivator();
+                while (value instanceof Derived) value = value();
+                return value;
+            }
+        }[name], DerivedPrototype);
     },
     onUseDerivedOutsideOfDerivation: "allow",
     onUseTrackedOutsideOfDerivation: "allow",
@@ -617,7 +649,7 @@ function State(name, value) {
 
 defineProperties(State, {
     track,
-    view(name, target, key) {
+    prop(name, target, key) {
         if (arguments.length == 2) {
             key = target;
             target = name;
@@ -626,7 +658,7 @@ defineProperties(State, {
             name = "" + name;
         }
         if (!target || (typeof target != "object" && typeof target != "function")) throw new TypeError("the target is not an object");
-        if (typeof key != "string" && typeof key != "number" && typeof key != "symbol") throw new TypeError("State.view can't use a value of type " + typeof key + " as a key");
+        if (typeof key != "string" && typeof key != "number" && typeof key != "symbol") throw new TypeError("State.prop can't use a value of type " + typeof key + " as a key");
         const State = ({
             [name]() {
                 return State[sym_target][State[sym_key]];
