@@ -677,48 +677,46 @@ export const Effect: {
 
 /** **Summary**: a function that when called, calls all the handlers
  *
- * its purpose is to be a function that can be declared first, and defined later
- *
- * it is like a reverse callback, instead of passing the callback so someone can call you,
- * you pass a signal so you can call them
+ * its purpose is to be a user level event,
+ * like how `State` decouples data sources from data consumers,
+ * `Signal` decouples event sources from event consumers
  *
  * adding persistent handlers may lead to unwanted strong references and memory leaks,
- * so signals have the same mechanism of having the handlers list out the things they affect,
- * and allowing them to be garbage collected only after the affected
+ * so signals have the same mechanism as effects, of having the handlers list out the things they affect,
+ * and allowing them to be garbage collected only after the affected are garbage collected
  *
  * **Reference**: when it is called it calls all handlers, forwarding the arguments and the this object, the handlers are called in the order they are added
+ *
+ * the function succeeds if all handlers succeed, if one or more of them fail, the errors are collected into an aggregate error and thrown
  */
-export type Signal<T extends (...args: any[]) => void> = Signal.Handler<T> & Signal.Prototype<T>;
-
-export const Signal: {
-    new <T extends (...args: any[]) => void>(): Signal<T>;
-    prototype: Signal<any>;
-};
-export namespace Signal {
-    /** **Summary**: the function that a `Signal<T>` accepts as handler, the `Signal<T>` also has the same call signature as its handlers
+export interface Signal<in out T extends any[]> {
+    (...args: T): void;
+    /** **Summary**: does the same as calling the signal, but returns errors instead of throwing them, always returns null on success and `AggregateError` otherwise */
+    try(...args: T): AggregateError | null;
+    /** **Summary**: adds a handler that will stop when garbage collected
      *
-     * **Reference**: the same function as T, except that it returns void */
-    type Handler<T extends (...args: any[]) => void> =
-        T extends (this: infer This, ...args: any[]) => void
-        ? (this: This, ...args: T extends (...args: infer Args) => void ? Args : []) => void
-        : (...args: T extends (...args: infer Args) => void ? Args : []) => void;
-    /** **Summary**: the methods found in signals
+     * but that will not be garbage collected while the objects passed are alive (the affected)
+     */
+    on(...args: [WeakKey, ...WeakKey[], (...args: T) => void]): this;
+    /** **Summary**: stops a handler from being called */
+    off(handler: (...args: T) => void): this;
+    /** **Summary**: adds a handler that will only stop being called when it is removed with the off method
      *
-     * **Reference**: due to how typescript works, interfaces can't extend `Signal.Handler`, so `Signal` is a type alias and the interface is found here, so it can still be extended if necessary */
-    interface Prototype<T extends (...args: any[]) => void> {
-        /** adds a handler that will stop when garbage collected
-         *
-         * but that will not be garbage collected while the objects passed are alive (the affected)
-         */
-        on(...args: [WeakKey, ...WeakKey[], Signal.Handler<T>]): this;
-        /** stops a handler from being called, works on handler added with both the `on` and `weak` methods */
-        off(handler: Signal.Handler<T>): this;
-        /** adds a handler that will only stop being called when it is removed with the off method */
-        persistent(handler: Signal.Handler<T>): this;
-        /** adds a handler that will stop when garbage collected */
-        weak(handler: Signal.Handler<T>): this;
-    }
+     * it is your responsiblity to ensure that either:
+     * 1. you call the off method at some point
+     * 2. the handler is meant to live for as long as the signal itself
+     */
+    persistent(handler: (...args: T) => void): this;
+    /** **Summary**: adds a handler that will stop when garbage collected or when removed with the off method
+     *
+     * it is your responsiblity to ensure that someone has strong references to the handler, or else the handler may unexpectedly stop working because of garbage collection
+     */
+    weak(handler: (...args: T) => void): this;
 }
+export const Signal: {
+    new <T extends any[] = []>(): Signal<T>;
+    prototype: Signal<any[]>;
+};
 
 declare global {
     interface Array<T> {

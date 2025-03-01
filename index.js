@@ -2485,10 +2485,9 @@ function promiseUseSetBySymbol(promise, sym) {
 }
 
 //#endregion
-
 //#region Signal
 
-/** @typedef {(this: any, ...args: any[]) => void} SignalHandler */
+/** @typedef {(...args: any[]) => void} SignalHandler */
 
 /** a map from strong handlers to null and from weak references to the weakmap that keeps weak handlers alive (or rather associated to this signal)
  * @typedef {Map<SignalHandler | WeakRef<SignalHandler>, WeakMap<WeakKey, SignalHandler> | null>} SignalHandlers */
@@ -2498,39 +2497,16 @@ function promiseUseSetBySymbol(promise, sym) {
 
 /** @typedef {{[sym_handlers]: SignalHandlers, [sym_weakrefs]: SignalWeakRefs}} Signal */
 
-const SignalPrototype = { __proto__: Function.prototype };
-
-function Signal() {
-    if (!new.target) throw new TypeError("Constructor Signal requires 'new'");
-    Object.setPrototypeOf(Signal, typeof new.target.prototype == "object" ? new.target.prototype : SignalPrototype);
-    Object.defineProperty(Signal, sym_handlers, { value: new Map(), writable: false, enumerable: false, configurable: false });
-    Object.defineProperty(Signal, sym_weakrefs, { value: new WeakMap(), writable: false, enumerable: false, configurable: false });
-    return Signal;
-    function Signal() {
-        /** @type {SignalHandlers} */
-        const handlers = Signal[sym_handlers];
-        const copy = Array.from(handlers.keys());
-        const length = copy.length;
-        for (let i = 0; i < length; i++) {
-            const weakref = copy[i];
-            if (typeof weakref == "function") {
-                weakref.apply(this, arguments);
-            } else {
-                const handler = weakref.deref();
-                if (!handler) {
-                    handlers.delete(weakref);
-                } else {
-                    handler.apply(this, arguments);
-                }
-            }
-        }
-    }
-}
-
-Signal.prototype = SignalPrototype;
-
-defineProperties(SignalPrototype, {
+const SignalPrototype = defineProperties({ __proto__: Function.prototype }, {
     constructor: Signal,
+    try() {
+        try {
+            this.apply(null, arguments);
+            return null;
+        } catch (e) {
+            return e;
+        }
+    },
     on() {
         if (arguments.length < 2) {
             throw new TypeError("Failed to call method 'on' 2 arguments required, but only " + arguments.length + " present");
@@ -2572,6 +2548,45 @@ defineProperties(SignalPrototype, {
         return this;
     },
 });
+
+function Signal() {
+    if (!new.target) throw new TypeError("Constructor Signal requires 'new'");
+    Object.setPrototypeOf(Signal, typeof new.target.prototype == "object" ? new.target.prototype : SignalPrototype);
+    Object.defineProperty(Signal, sym_handlers, { value: new Map(), writable: false, enumerable: false, configurable: false });
+    Object.defineProperty(Signal, sym_weakrefs, { value: new WeakMap(), writable: false, enumerable: false, configurable: false });
+    return Signal;
+    function Signal() {
+        /** @type {SignalHandlers} */
+        const handlers = Signal[sym_handlers];
+        const copy = Array.from(handlers.keys());
+        const length = copy.length;
+        let errors = null;
+        for (let i = 0; i < length; i++) {
+            try {
+                const weakref = copy[i];
+                if (typeof weakref == "function") {
+                    weakref.apply(null, arguments);
+                } else {
+                    const handler = weakref.deref();
+                    if (!handler) {
+                        handlers.delete(weakref);
+                    } else {
+                        handler.apply(null, arguments);
+                    }
+                }
+            } catch (e) {
+                if (errors) {
+                    errors.push(e);
+                } else {
+                    errors = [e];
+                }
+            }
+        }
+        if (errors) throw new AggregateError(errors, "Signal handler failed");
+    }
+}
+
+Signal.prototype = SignalPrototype;
 
 /** @param {Signal} signal @param {{[key: number]: any; length: number}} args */
 function signalAddWeakHandler(signal, args) {
