@@ -395,7 +395,20 @@ export const State: {
          * **Reference**: adds a "all" dependency of this object to the current derivator, does nothing if target is not tracked or if no derivator is currently running
          */
         use(target: object): void;
-        prototype: Object;
+        readonly prototype: Object;
+        /** does the same as `Object.fromEntries`, but the created object is tracked and wrapped in a proxy */
+        fromEntries<T = any>(entries: Iterable<readonly [PropertyKey, T]>): { [k: string]: T; };
+        /** does the same as `Object.fromEntries`, but the created object is tracked and wrapped in a proxy */
+        fromEntries(entries: Iterable<readonly any[]>): any;
+        /** does the same as `Object.create`, but the created object is tracked and wrapped in a proxy */
+        create(o: object | null): any;
+        /** does the same as `Object.create`, but the created object is tracked and wrapped in a proxy */
+        create(o: object | null, properties: PropertyDescriptorMap & ThisType<any>): any;
+        /** does the same as `Object.groupBy`, but the created object is tracked and wrapped in a proxy */
+        groupBy<K extends PropertyKey, T>(
+            items: Iterable<T>,
+            keySelector: (item: T, index: number) => K,
+        ): Partial<Record<K, T[]>>;
     };
     /** **Summary**: an array that is tracked, changes to it can be noticed by derivations that use it
      *
@@ -406,6 +419,12 @@ export const State: {
      * **Reference**: creates a new array with the correct prototype and already wrapped in a proxy
      */
     Array: {
+        new (arrayLength?: number): any[];
+        new <T>(arrayLength: number): T[];
+        new <T>(...items: T[]): T[];
+        (arrayLength?: number): any[];
+        <T>(arrayLength: number): T[];
+        <T>(...items: T[]): T[];
         new <T = any>(arrayLength?: number): T[];
         <T = any>(arrayLength?: number): T[];
         /** **Summary**: use the entire array, the current derivator will rerun if anything in the array changes
@@ -416,6 +435,12 @@ export const State: {
          */
         use(target: unknown[]): void;
         readonly prototype: any[];
+        /** does the same as `Array.from`, but the created array is tracked and wrapped in a proxy */
+        from<T>(iterable: Iterable<T> | ArrayLike<T>): T[];
+        /** does the same as `Array.from`, but the created array is tracked and wrapped in a proxy */
+        from<T, U>(iterable: Iterable<T> | ArrayLike<T>, mapfn: (v: T, k: number) => U, thisArg?: any): U[];
+        /** does the same as `Array.of`, but the created array is tracked and wrapped in a proxy */
+        of<T>(...items: T[]): T[];
     };
     /** **Summary**: a map that is tracked, changes to it can be noticed by derivations that use it
      *
@@ -455,12 +480,62 @@ export const State: {
         use(target: Set<unknown>): void;
         readonly prototype: Set<any>;
     };
+    /** **Summary**: a promise that is tracked, its resolution and rejection can be noticed by derivations that use it
+     *
+     * you can inherit from this to allow your custom promise classes to be created already tracked (custom classes are not tracked by default, see {@link State.track})
+     *
+     * you can use `instanceof State.Promise` to test if an object is tracked, `instanceof State.Object` also returns true for tracked promises
+     *
+     * **Reference**: creates a new promise with the correct prototype
+     */
+    Promise: {
+        new <T>(executor: (resolve: (value: T | PromiseLike<T>) => void, reject: (reason?: any) => void) => void): Promise<T>;
+        /** **Summary**: use the entire promise, the current derivator will rerun if the promise resolves or rejects
+         *
+         * this has no real performance improvements over depending on resolution and rejection separately, this function is added mostly for completeness, although it does add tracking, but it should not be depended upon for this
+         *
+         * **Reference**: adds a dependency of the resolution and rejection of this promise to the current derivator, if target is not tracked then it adds tracking before adding the dependencies, does nothing if the promise is known to be resolved or if no derivator is currently running
+         */
+        use(target: Promise<unknown>): void;
+        readonly prototype: Promise<any>;
+        /** does the same as `Promise.all`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+        all<T>(values: Iterable<T | PromiseLike<T>>): Promise<Awaited<T>[]>;
+        /** does the same as `Promise.race`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+        race<T>(values: Iterable<T | PromiseLike<T>>): Promise<Awaited<T>>;
+        /** does the same as `Promise.all`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+        all<T extends readonly unknown[] | []>(values: T): Promise<{ -readonly [P in keyof T]: Awaited<T[P]>; }>;
+        /** does the same as `Promise.race`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+        race<T extends readonly unknown[] | []>(values: T): Promise<Awaited<T[number]>>;
+        /** does the same as `Promise.reject`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+        reject<T = never>(reason?: any): Promise<T>;
+        /** does the same as `Promise.resolve`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+        resolve(): Promise<void>;
+        /** does the same as `Promise.resolve`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+        resolve<T>(value: T): Promise<Awaited<T>>;
+        /** does the same as `Promise.resolve`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+        resolve<T>(value: T | PromiseLike<T>): Promise<Awaited<T>>;
+        /** does the same as `Promise.allSettled`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+        allSettled<T extends readonly unknown[] | []>(values: T): Promise<{ -readonly [P in keyof T]: PromiseSettledResult<Awaited<T[P]>>; }>;
+        /** does the same as `Promise.allSettled`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+        allSettled<T>(values: Iterable<T | PromiseLike<T>>): Promise<PromiseSettledResult<Awaited<T>>[]>;
+        /** does the same as `Promise.any`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+        any<T extends readonly unknown[] | []>(values: T): Promise<Awaited<T[number]>>;
+        /** does the same as `Promise.any`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+        any<T>(values: Iterable<T | PromiseLike<T>>): Promise<Awaited<T>>;
+        /** does the same as `Promise.withResolvers`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+        withResolvers<T>(): {
+            promise: Promise<T>;
+            resolve: (value: T | PromiseLike<T>) => void;
+            reject: (reason?: any) => void;
+        };
+    };
 };
 export namespace State {
     type Object = globalThis.Object;
     type Array<T> = globalThis.Array<T>;
     type Map<K, V> = globalThis.Map<K, V>;
     type Set<T> = globalThis.Set<T>;
+    type Promise<T> = globalThis.Promise<T>;
 }
 
 /** **Summary**: do something on affected objects when the dependencies changes (not lazy)

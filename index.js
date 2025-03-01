@@ -695,6 +695,7 @@ defineProperties(State, {
     Array: StateArray,
     Map: StateMap,
     Set: StateSet,
+    Promise: StatePromise,
 })
 
 State.prototype = StatePrototype;
@@ -1054,7 +1055,17 @@ function track(value) {
                 // TODO! wrap the object in a dedicated proxy for objects with untracked properties
             }
         }
-        return createStateArray(value, StateArrayPrototype);
+        
+        const proxy = new Proxy(value, StateArrayProxyHandler);
+        const length = value.length || 0;
+        Object.setPrototypeOf(value, StateArrayPrototype);
+        Object.defineProperty(value, sym_ders, { value: Array(length) });
+        Object.defineProperty(value, sym_slots, { value: Array(length) });
+        Object.defineProperty(value, sym_len, { value: new Set() });
+        Object.defineProperty(value, sym_all, { value: new Set() });
+        Object.defineProperty(value, sym_value, { value });
+        Object.defineProperty(value, sym_tracked, { value: proxy });
+        return proxy;
     } else if (value instanceof Promise) {
         if (!Object.isExtensible(value)) trackNonExtensibleError();
         const promise = Object.defineProperty(value, sym_tracked, { value });
@@ -1316,6 +1327,15 @@ defineProperties(StateObject, {
         if (!set) ders[sym_all] = set = new Set();
         set.add(current_derived);
     },
+    fromEntries: function fromEntries() {
+        return track(Object.fromEntries.apply(Object, arguments));
+    },
+    create: function create() {
+        return track(Object.create.apply(Object, arguments));
+    },
+    groupBy: function groupBy() {
+        return track(Object.groupBy.apply(Object, arguments));
+    },
 });
 
 StateObject.prototype = Object.prototype;
@@ -1473,10 +1493,10 @@ keys
 */
 // #endregion
 
-function createStateArray(value, prototype) {
+function StateArray() {
+    const value = Reflect.construct(Array, arguments, new.target || StateArray);
     const proxy = new Proxy(value, StateArrayProxyHandler);
     const length = value.length || 0;
-    Object.setPrototypeOf(value, prototype);
     Object.defineProperty(value, sym_ders, { value: Array(length) });
     Object.defineProperty(value, sym_slots, { value: Array(length) });
     Object.defineProperty(value, sym_len, { value: new Set() });
@@ -1484,12 +1504,6 @@ function createStateArray(value, prototype) {
     Object.defineProperty(value, sym_value, { value });
     Object.defineProperty(value, sym_tracked, { value: proxy });
     return proxy;
-}
-
-function StateArray(arrayLength) {
-    if (typeof arrayLength != "number" && arrayLength !== undefined) throw new TypeError("arrayLength is not a number");
-    const prototype = (constructor && constructor.prototype && typeof constructor.prototype == "object") ? constructor.prototype : StateArrayPrototype;
-    return createStateArray(arrayLength, prototype);
 }
 
 defineProperties(StateArray, {
@@ -1501,6 +1515,12 @@ defineProperties(StateArray, {
         if (!prepareUseTracked() || !(sym_len in target)) return;
         while (sym_src in target) target = target[sym_src];
         target[sym_all].add(current_derived);
+    },
+    from: function from() {
+        return track(Array.from.apply(Array, arguments));
+    },
+    of: function of() {
+        return track(Array.of.apply(Array, arguments));
     },
 });
 
@@ -1867,13 +1887,11 @@ function mutationOnDerivedArray() {
     throw new TypeError("cannot mutate derived array");
 }
 
-function DerivedArray(arrayLength) {
+function DerivedArray() {
     // return StateArray instances and not DerivedArray instances,
     // this serves as a constructor with a different name for the DerivedArrayPrototype for better debugging
     // we return StateArray here to allow deep clones, jest needs it and possibly other libraries too
-    if (typeof arrayLength != "number" && arrayLength !== undefined) throw new TypeError("arrayLength is not a number");
-    const prototype = (constructor && constructor.prototype && typeof constructor.prototype == "object") ? constructor.prototype : StateArrayPrototype;
-    return createStateArray(arrayLength, prototype);
+    return StateArray.apply(null, arguments);
 }
 
 const DerivedArrayPrototype = defineProperties({ __proto__: StateArrayPrototype }, {
@@ -2324,6 +2342,69 @@ defineProperties(StateSet, {
                 all.add(current_derived);
             }
         }
+    },
+});
+
+//#endregion
+//#region promise
+
+function StatePromise(executor) {
+    if (!new.target) throw new TypeError("Constructor StatePromise requires 'new'");
+    return track(Reflect.construct(Promise, [executor], new.target));
+}
+
+StatePromise.prototype = Promise.prototype;
+
+defineProperties(StatePromise, {
+    [Symbol.hasInstance](target) {
+        return Array.isArray(target) && sym_tracked in target;
+    },
+    use(target) {
+        if (!(target instanceof Promise)) throw new TypeError("target is not a Promise");
+        track(target);
+        if (sym_resolved in target || sym_rejected in target) return;
+        promiseUseSetBySymbol(target, sym_ders_resolved);
+        promiseUseSetBySymbol(target, sym_ders_rejected);
+        Promise.any
+    },
+    resolve(value) {
+        const promise = Promise.resolve(value);
+        Object.defineProperty(promise, sym_tracked, { value: promise });
+        Object.defineProperty(promise, sym_resolved, { value });
+        return promise;
+    },
+    reject(value) {
+        const promise = Promise.reject(value);
+        Object.defineProperty(promise, sym_tracked, { value: promise });
+        Object.defineProperty(promise, sym_rejected, { value });
+        return promise;
+    },
+    race: function race() {
+        return track(Promise.race.apply(Promise, arguments));
+    },
+    all: function all() {
+        return track(Promise.all.apply(Promise, arguments));
+    },
+    allSettled: function allSettled() {
+        return track(Promise.allSettled.apply(Promise, arguments));
+    },
+    any: function any() {
+        return track(Promise.any.apply(Promise, arguments));
+    },
+    withResolvers: function withResolvers() {
+        if (Promise.withResolvers) {
+            const obj = Promise.withResolvers();
+            track(obj.promise);
+            return obj;
+        }
+        let f, r;
+        const p = new Promise<T>((resolve, reject) => { f = resolve; r = reject; });
+        if (!f || !r) throw new Error("StatePromise.withResolvers polyfill failed because the Promise constructor did not run the executor synchronously");
+        return {
+            promise: track(p),
+            resolve: f,
+            reject: r,
+        };
     },
 });
 
