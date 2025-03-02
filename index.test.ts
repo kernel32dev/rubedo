@@ -957,6 +957,68 @@ describe("tracked set", () => {
     });
 });
 
+describe('Derived.Array.proxy', () => {
+    it('should be an array according to Array.isArray', () => {
+        const derivedArray = Derived.Array.proxy(null, {
+            length: () => 0,
+            item: (_target, index) => Derived.Array.empty,
+        });
+        expect(Array.isArray(derivedArray)).toBe(true);
+    });
+    it('should create a derived array with correct length', () => {
+        const derivedArray = Derived.Array.proxy(null, {
+            length: () => 3,
+            item: (_target, index) => index >= 3 ? Derived.Array.empty : index * 2,
+        });
+        expect(derivedArray.length).toBe(3);
+    });
+
+    it('should retrieve items correctly', () => {
+        const derivedArray = Derived.Array.proxy(null, {
+            length: () => 3,
+            item: (_target, index) => index * 2,
+        });
+        expect(derivedArray[0]).toBe(0);
+        expect(derivedArray[1]).toBe(2);
+        expect(derivedArray[2]).toBe(4);
+    });
+
+    it('should return empty symbol for missing items', () => {
+        const derivedArray = Derived.Array.proxy(null, {
+            length: () => 3,
+            item: (_target, index) => index >= 3 ? Derived.Array.empty : (index === 1 ? Derived.Array.empty : index),
+        });
+        expect(derivedArray[0]).toBe(0);
+        expect(derivedArray[1]).toBe(undefined);
+        expect(derivedArray[2]).toBe(2);
+    });
+
+    it('should use custom has method if provided', () => {
+        const derivedArray = Derived.Array.proxy(null, {
+            length: () => 3,
+            item: (_target, index) => index == 0 || index === 2 ? index : Derived.Array.empty,
+            has: (_target, index) => index == 0 || index === 2,
+        });
+        expect(0 in derivedArray).toBe(true);
+        expect(1 in derivedArray).toBe(false);
+        expect(2 in derivedArray).toBe(true);
+    });
+
+    it('should call use method when accessing items', () => {
+        const useMock = jest.fn();
+        const derivedArray = Derived.Array.proxy(null, {
+            length: () => 3,
+            item: (_target, index) => index >= 3 ? Derived.Array.empty : index,
+            use: useMock,
+        });
+        expect(useMock).not.toHaveBeenCalled();
+        for (const i in derivedArray) {}
+        expect(useMock).toHaveBeenCalledTimes(1);
+        Object.getOwnPropertyNames(derivedArray);
+        expect(useMock).toHaveBeenCalledTimes(2);
+    });
+});
+
 describe("State.is", () => {
     test("frozen objects compare equal", () => {
         const is = State.is;

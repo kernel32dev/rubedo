@@ -161,6 +161,39 @@ export const Derived: {
     cheap<T>(derivator: () => T): Derived<Derived.Use<T>>;
     cheap<T>(name: string, derivator: () => T): Derived<Derived.Use<T>>;
 
+    /** TODO! document this */
+    Array: {
+        new(...args: never): never;
+        // TODO! remove this - the following is a draft for adding symbols to the derived array proxy api
+        /** **Summary**: creates an immutable derived array, whose values are derived from handler functions
+         *
+         * the handler object must have the following methods:
+         *
+         * - **length** - returns the length of the array
+         * - **item** - returns the value of the item identified by the particular number or symbol (more on that later)
+         * - **symbol** - (optional) returns the symbol that represents a particular index
+         * - **use** - (optional) use the entire array, "use" as in add a dependency of the current derivator to the entire array
+         *
+         * symbols are used to keep track of the items of an array as it is shifted, spliced, sorted, reversed and whatever other operations shift items
+         *
+         * the idea is that if an item at a particular slot
+         */
+
+        /** **Summary**: creates a read-only derived array, whose values are derived from handler functions every time they are read
+         *
+         * the handler object must have the following methods:
+         *
+         * - **length** - returns the length of the array
+         * - **item** - returns the value of the item at the specified index or `Derived.Array.empty` to indicate an empty slot
+         * - **has** - (optional) returns true if the index is present, by default calls item and checks if it returned `Derived.Array.empty`
+         * - **use** - (optional) use the entire array, "use" as in add a dependency of the current derivator to the entire array
+         *
+         */
+        proxy<T, I>(target: T, handler: Derived.Array.ProxyHandler<T, I>): T[];
+
+        readonly empty: unique symbol;
+    };
+
     /** set this property to a function to log when any `WeakRef` created by rubedo is garbage collected */
     debugLogWeakRefCleanUp: ((message: string) => void) | null;
 
@@ -193,6 +226,21 @@ export namespace Derived {
 
     /** **Summary**: a recursive type alias to help you turn `T`, `Derived<T>` or `Derived<Derived<T>>` into `T` */
     type Use<T> = T extends Derived<infer U> ? Use<U> : T;
+
+    type Array<T> = globalThis.Array<T>;
+    namespace Array {
+        /** inteface used to create derived arrays - TODO! finish documenting this */
+        interface ProxyHandler<T, I> {
+            length(this: ProxyHandler<T, I>, target: T): number;
+            item(this: ProxyHandler<T, I>, target: T, index: number): I | typeof Derived.Array.empty;
+            has?(this: ProxyHandler<T, I>, target: T, index: number): boolean;
+            use?(this: ProxyHandler<T, I>, target: T): void;
+
+            // TODO! remove this code
+            // item(target: T, index: number | symbol): I;
+            // symbol?(target: T, index: number): symbol;
+        }
+    }
 }
 
 /** **Summary**: hold a single mutable value

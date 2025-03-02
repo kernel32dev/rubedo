@@ -1,6 +1,8 @@
 //@ts-nocheck
 "use strict";
 
+// TODO! replace creation of objects followed by `Object.setPrototypeOf` with `Reflect.construct`
+
 //#region symbols
 
 // TODO! organize the symbols and don't share them unless necessary
@@ -112,14 +114,11 @@ const sym_tracked = Symbol("tracked");
  */
 const sym_all = Symbol("all");
 
-/** exists on DerivedMapArray, the array from which the map occurs */
-const sym_src = Symbol("src");
-
-/** exists on DerivedMapArray */
-const sym_cache = Symbol("cache");
-
-/** used by StateView */
+/** used by StateView and DerivedArray */
 const sym_target = Symbol("target");
+
+/** used by StateView and DerivedArray */
+const sym_handler = Symbol("handler");
 
 /** used by StateView */
 const sym_key = Symbol("key");
@@ -144,15 +143,15 @@ const sym_ders_rejected = Symbol("ders_rejected");
 
 /** used by Signal */
 const sym_handlers = Symbol("handlers");
+
 /** used by Signal */
 const sym_weakrefs = Symbol("weakrefs");
 
+/** used by Derived.Array.Proxy.item to represent absence */
+const sym_empty = Symbol("empty");
+
 //#endregion
 //#region globals
-
-
-/** the derivator function of the derivator object, exists on Derived and on DerivedMapArray */
-const sym_mapfn = Symbol("mapfn");
 
 /** Derived
  * @typedef {{
@@ -173,14 +172,6 @@ const sym_mapfn = Symbol("mapfn");
  *     [sym_value]: StateArray,
  *     [sym_tracked]: StateArray,
  * }} StateArray
- */
-
-/** DerivedMapArray
- * @typedef {StateArray & {
- *     [sym_src]: StateArray,
- *     [sym_mapfn](value: T, index: Derived, array: T[]): U,
- *     [sym_cache]: WeakMap<Set<WeakKey<Derived>>, Derived>,
- * }} DerivedMapArray
  */
 
 /** if this value is set, it is the weak ref of the derived currently running at the top of the stack
@@ -462,7 +453,7 @@ function Derived(name, derivator) {
     return derived;
 }
 
-defineProperties(Derived, {
+Object.assign(Derived, {
     now(derivator) {
         const old_derived = current_derived;
         const old_derived_used = current_derived_used;
@@ -517,6 +508,7 @@ defineProperties(Derived, {
             }
         }[name], DerivedPrototype);
     },
+    Array: DerivedArray,
     onUseDerivedOutsideOfDerivation: "allow",
     onUseTrackedOutsideOfDerivation: "allow",
 })
@@ -647,7 +639,7 @@ function State(name, value) {
     return State;
 }
 
-defineProperties(State, {
+Object.assign(State, {
     track,
     prop(name, target, key) {
         if (arguments.length == 2) {
@@ -786,7 +778,7 @@ function Effect() {
     return affector;
 }
 
-defineProperties(Effect, {
+Object.assign(Effect, {
     Persistent: function Persistent(name, affector) {
         if (!new.target) throw new TypeError("Constructor Effect.Persistent requires 'new'");
         if (arguments.length == 1) {
@@ -1302,7 +1294,153 @@ function isr(a, b) {
 }
 
 //#endregion
-//#region object
+//#region derived array
+
+function mutationOnDerivedArray() {
+    throw new TypeError("cannot mutate derived array");
+}
+
+function DerivedArray() {
+    // return StateArray instances and not DerivedArray instances,
+    // this serves as a constructor with a different name for the DerivedArrayPrototype for better debugging
+    // we return StateArray here to allow deep clones, jest needs it and possibly other libraries too
+    return StateArray.apply(null, arguments);
+}
+
+const DerivedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
+    constructor: DerivedArray,
+    push() { mutationOnDerivedArray(); },
+    pop() { mutationOnDerivedArray(); },
+    unshift() { mutationOnDerivedArray(); },
+    shift() { mutationOnDerivedArray(); },
+    splice() { mutationOnDerivedArray(); },
+    sort() { mutationOnDerivedArray(); },
+    reverse() { mutationOnDerivedArray(); },
+    copyWithin() { mutationOnDerivedArray(); },
+    fill() { mutationOnDerivedArray(); },
+});
+
+DerivedArray.prototype = DerivedArrayPrototype;
+
+Object.assign(DerivedArray, {
+    proxy(target, handler) {
+        const target2 = [];
+        const proxy = new Proxy(target2, DerivedArrayProxyHandler);
+        Object.setPrototypeOf(target2, DerivedArrayPrototype);
+        target2[sym_target] = target;
+        target2[sym_handler] = handler;
+        target2[sym_tracked] = proxy;
+        return proxy;
+    },
+    empty: sym_empty,
+});
+
+/** @type {ProxyHandler<StateArray>} */
+const OldDerivedArrayProxyHandler = {
+    defineProperty() { mutationOnDerivedArray(); },
+    deleteProperty() { mutationOnDerivedArray(); },
+    set() { mutationOnDerivedArray(); },
+    setPrototypeOf() { mutationOnDerivedArray(); },
+    preventExtensions() { mutationOnDerivedArray(); },
+};
+
+/** @type {ProxyHandler<{[sym_handler]: import(".").Derived.Array.ProxyHandler, [sym_target]: any[]}>} */
+const DerivedArrayProxyHandler = {
+    //apply(target, thisArg, argArray) {
+    //    return Reflect.apply(target, thisArg, argArray);
+    //},
+    //construct(target, thisArg, argArray) {
+    //    return Reflect.construct(target, thisArg, argArray);
+    //},
+    defineProperty() {
+        throw new TypeError("cannot define properties on a Derived Array");
+    },
+    deleteProperty() {
+        throw new TypeError("cannot delete properties on a Derived Array");
+    },
+    get(target, p, receiver) {
+        if (p === "length") {
+            return validate_length(target[sym_handler].length(target[sym_target]));
+        }
+        const index = as_index(p);
+        if (index == undefined) return Reflect.get(target, p, receiver);
+        const value = target[sym_handler].item(target[sym_target], index);
+        return value === sym_empty ? undefined : value;
+    },
+    getOwnPropertyDescriptor(target, p) {
+        console.log(Reflect.getOwnPropertyDescriptor(target, p));
+        if (p === "length") return {
+            value: validate_length(target[sym_handler].length(target[sym_target])),
+            writable: true,
+            enumerable: false,
+            configurable: false,
+        };
+        const index = as_index(p);
+        if (index == undefined) return Reflect.getOwnPropertyDescriptor(target, p);
+        const value = target[sym_handler].item(target[sym_target], index);
+        return {
+            value: value === sym_empty ? undefined : value,
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        };
+    },
+    // getPrototypeOf(target) {
+    //     return Reflect.getPrototypeOf(target);
+    // },
+    has(target, p) {
+        if (p === "length") return true;
+        const index = as_index(p);
+        if (index == undefined) return Reflect.has(target, p);
+        const handler = target[sym_handler];
+        return handler.has ? !!handler.has(target[sym_target], index) : handler.item(target[sym_target], index) !== sym_empty;
+    },
+    isExtensible(target) {
+        return true;
+    },
+    ownKeys(target) {
+        const handler = target[sym_handler];
+        target = target[sym_target];
+        handler.use && handler.use();
+        const length = validate_length(handler.length(target));
+        const keys = [];
+        if (handler.has) {
+            for (let i = 0; i < keys.length; i++) {
+                if (handler.has(target, i)) {
+                    keys[keys.length] = "" + i;
+                }
+            }
+        } else {
+            for (let i = 0; i < keys.length; i++) {
+                if (handler.item(target, i) !== sym_empty) {
+                    keys[keys.length] = "" + i;
+                }
+            }
+        }
+        keys[keys.length] = "length";
+        keys[keys.length] = sym_handler;
+        keys[keys.length] = sym_target;
+        keys[keys.length] = sym_tracked;
+        return keys;
+    },
+    preventExtensions() {
+        throw new TypeError("cannot prevent extensions of a Derived Array");
+    },
+    set() {
+        throw new TypeError("cannot set properties of a Derived Array");
+    },
+    setPrototypeOf() {
+        throw new TypeError("cannot set the prototype of a Derived Array");
+    },
+};
+
+function validate_length(length) {
+    if (typeof length == "number" && length >= 0 && length <= 0xFFFFFFFF && Number.isInteger(length)) return length;
+    throw new RangeError("Derived Array Proxy length method returned an invalid value: " + length);
+}
+
+//#endregion
+//#region state object
 
 // TODO! add static methods to constructors of state objects, arrays map set and promise
 
@@ -1314,10 +1452,15 @@ function StateObject() {
     return proxy;
 }
 
-defineProperties(StateObject, {
-    [Symbol.hasInstance](target) {
+Object.defineProperty(StateObject, Symbol.hasInstance, {
+    value: function isStateObject(target) {
         return target && typeof target == "object" && sym_tracked in target;
     },
+    writable: true,
+    enumerable: true,
+    configurable: true,
+});
+Object.assign(StateObject, {
     use(target) {
         if (!target || typeof target !== "object") throw new TypeError("target is not an Object");
         if (!prepareUseTracked()) return;
@@ -1435,7 +1578,7 @@ function stateObjectUse(target, key) {
 }
 
 //#endregion
-//#region array
+//#region state array
 
 // #region Overview
 /*
@@ -1510,10 +1653,15 @@ function StateArray() {
     return proxy;
 }
 
-defineProperties(StateArray, {
-    [Symbol.hasInstance](target) {
+Object.defineProperty(StateArray, Symbol.hasInstance, {
+    value: function isStateArray(target) {
         return Array.isArray(target) && sym_tracked in target;
     },
+    writable: true,
+    enumerable: true,
+    configurable: true,
+});
+Object.assign(StateArray, {
     use(target) {
         if (!target || typeof target !== "object" || !Array.isArray(target)) throw new TypeError("target is not an Array");
         if (!prepareUseTracked() || !(sym_len in target)) return;
@@ -1528,7 +1676,7 @@ defineProperties(StateArray, {
     },
 });
 
-const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
+const StateArrayPrototype = defineProperties({ __proto__: DerivedArrayPrototype }, {
     constructor: StateArray,
     push() {
         const target = /** @type {StateArray} */ (this[sym_value]);
@@ -1700,7 +1848,7 @@ const StateArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
     },
 
     $map(derivator, thisArg) {
-        return DerivedMapArray(this, derivator, thisArg);
+        throw new Error("TODO! implement $map");
     },
 });
 
@@ -1885,164 +2033,6 @@ function stateArrayUseProp(target, prop) {
     }
 }
 
-//#region DerivedArray
-
-function mutationOnDerivedArray() {
-    throw new TypeError("cannot mutate derived array");
-}
-
-function DerivedArray() {
-    // return StateArray instances and not DerivedArray instances,
-    // this serves as a constructor with a different name for the DerivedArrayPrototype for better debugging
-    // we return StateArray here to allow deep clones, jest needs it and possibly other libraries too
-    return StateArray.apply(null, arguments);
-}
-
-const DerivedArrayPrototype = defineProperties({ __proto__: StateArrayPrototype }, {
-    constructor: DerivedArray,
-    push() { mutationOnDerivedArray(); },
-    pop() { mutationOnDerivedArray(); },
-    unshift() { mutationOnDerivedArray(); },
-    shift() { mutationOnDerivedArray(); },
-    splice() { mutationOnDerivedArray(); },
-    sort() { mutationOnDerivedArray(); },
-    reverse() { mutationOnDerivedArray(); },
-    copyWithin() { mutationOnDerivedArray(); },
-    fill() { mutationOnDerivedArray(); },
-});
-
-DerivedArray.prototype = DerivedArrayPrototype;
-
-/** @type {ProxyHandler<StateArray>} */
-const DerivedArrayProxyHandler = {
-    defineProperty() { mutationOnDerivedArray(); },
-    deleteProperty() { mutationOnDerivedArray(); },
-    set() { mutationOnDerivedArray(); },
-    setPrototypeOf() { mutationOnDerivedArray(); },
-    preventExtensions() { mutationOnDerivedArray(); },
-};
-
-//#endregion
-
-//#region DerivedMapArray
-
-function DerivedMapArray(src, derivator, thisArg) {
-    const value = Array();
-    const proxy = new Proxy(value, DerivedMapArrayProxyHandler);
-    Object.setPrototypeOf(value, DerivedArrayPrototype);
-    // TODO! this is wrong, because the mapper function is not pure
-    // to depend on a slot/prop of a derived mapped array is not to depend on the slot/prop of its source,
-    // since the mapper function may add its own dependencies
-    Object.defineProperty(value, sym_ders, { value: src[sym_ders] });
-    Object.defineProperty(value, sym_slots, { value: src[sym_slots] });
-    Object.defineProperty(value, sym_len, { value: src[sym_len] });
-    Object.defineProperty(value, sym_all, { value: src[sym_all] });
-    Object.defineProperty(value, sym_value, { value });
-    Object.defineProperty(value, sym_tracked, { value: proxy });
-
-    Object.defineProperty(value, sym_src, { value: src });
-    Object.defineProperty(value, sym_mapfn, { value: derivator.bind(thisArg) });
-    Object.defineProperty(value, sym_cache, { value: new WeakMap() });
-    return proxy;
-}
-
-/** @type {ProxyHandler<DerivedMapArray>} */
-const DerivedMapArrayProxyHandler = {
-    ...DerivedArrayProxyHandler,
-    get(target, p, receiver) {
-        if (p === "length") {
-            return target[sym_src].length;
-        }
-        const index = as_index(p);
-        if (index !== undefined) return derivedMapArrayGet(target, index);
-        return Reflect.get(target, p, receiver);
-    },
-    getOwnPropertyDescriptor(target, p) {
-        if (p === "length") {
-            return {
-                value: target[sym_src].length,
-                writable: true,
-                enumerable: false,
-                configurable: false,
-            };
-        }
-        const index = as_index(p);
-        if (index !== undefined) return {
-            value: derivedMapArrayGet(target, index),
-            writable: false,
-            enumerable: false,
-            configurable: true,
-        };
-        return Reflect.getOwnPropertyDescriptor(target, p);
-    },
-    //getPrototypeOf(target) {},
-    has(target, p) {
-        if (p === "length") {
-            return true;
-        }
-        const index = as_index(p);
-        if (index !== undefined) return index in target[sym_src];
-        return Reflect.has(target, p);
-    },
-    isExtensible(target) {
-        return true;
-    },
-    ownKeys(target) {
-        const src = target[sym_src];
-        const length = src.length;
-        const keys = [];
-        for (let i = 0; i < length; i++) {
-            if (i in src) keys[keys.length] = "" + i;
-        }
-        keys[keys.length] = "length";
-        keys.push(...Object.getOwnPropertySymbols(target));
-        return keys;
-    },
-};
-
-/** @param {DerivedMapArray} target @param {number} index */
-function derivedMapArrayGet(target, index) {
-    const src = target[sym_src];
-    const slots = src[sym_slots];
-    if (index >= slots.length) {
-        // the `target.length` produces the side effect of using the length,
-        // and we just so happen to need to return undefined in this case
-        return void src.length;
-    }
-    const tracked = target[sym_tracked];
-    const cache = target[sym_cache];
-    const ders = src[sym_ders];
-    let slot_set = slots[index];
-    if (!slot_set) slots[index] = slot_set = new Set();
-    let cached = cache.get(slot_set);
-    if (!cached) {
-        const derived_index = Object.setPrototypeOf(function DerivedIndex() {
-            const index = slots.indexOf(slot_set);
-            if (prepareUseTracked()) {
-                // index should always be less than length, because the length of ders and slots should always be in sync
-                let der_set = ders[index];
-                if (!der_set) ders[index] = der_set = new Set();
-                der_set.add(current_derived);
-            }
-            return index;
-        }, DerivedPrototype);
-
-        const derived_slot = new Derived(() => {
-            const index = slots.indexOf(slot_set);
-            if (index != -1) {
-                slot_set.add(derived_slot[sym_weak]);
-                current_derived_used = true;
-                const value = Derived.now(() => src[index]);
-                return target[sym_mapfn](value, derived_index, tracked);
-            }
-        });
-        cache.set(slot_set, cached = derived_slot);
-    }
-    return cached();
-}
-
-//#endregion
-
 //#region array helper functions
 function normalize_length(length, max) {
     length = Math.trunc(+length);
@@ -2083,7 +2073,7 @@ function as_index(key) {
         const int = +key;
         if ("" + int === key) key = int;
     }
-    if (typeof key == "number" && key >= 0 && key <= 0xFFFFFFFE && Number.isSafeInteger(key)) return key;
+    if (typeof key == "number" && key >= 0 && key <= 0xFFFFFFFE && Number.isInteger(key)) return key;
     return undefined;
 }
 function as_length(key) {
@@ -2091,13 +2081,13 @@ function as_length(key) {
         const int = +key;
         if ("" + int === key) key = int;
     }
-    if (typeof key == "number" && key >= 0 && key <= 0xFFFFFFFF && Number.isSafeInteger(key)) return key;
+    if (typeof key == "number" && key >= 0 && key <= 0xFFFFFFFF && Number.isInteger(key)) return key;
     return undefined;
 }
 //#endregion
 
 //#endregion
-//#region map
+//#region state map
 
 const nativeMapSizeGetter = Object.getOwnPropertyDescriptor(Map.prototype, "size").get;
 
@@ -2221,7 +2211,7 @@ function StateMap(iterable) {
 
 StateMap.prototype = StateMapPrototype;
 
-defineProperties(StateMap, {
+Object.assign(StateMap, {
     use(target) {
         if (!(target instanceof Map)) throw new TypeError("target is not a Map");
         if (prepareUseTracked()) {
@@ -2234,7 +2224,7 @@ defineProperties(StateMap, {
 });
 
 //#endregion
-//#region set
+//#region state set
 
 const nativeSetSizeGetter = Object.getOwnPropertyDescriptor(Set.prototype, "size").get;
 
@@ -2337,7 +2327,7 @@ function StateSet(iterable) {
 
 StateSet.prototype = StateSetPrototype;
 
-defineProperties(StateSet, {
+Object.assign(StateSet, {
     use(target) {
         if (!(target instanceof Set)) throw new TypeError("target is not a Set");
         if (prepareUseTracked()) {
@@ -2350,7 +2340,7 @@ defineProperties(StateSet, {
 });
 
 //#endregion
-//#region promise
+//#region state promise
 
 function StatePromise(executor) {
     if (!new.target) throw new TypeError("Constructor StatePromise requires 'new'");
@@ -2358,11 +2348,15 @@ function StatePromise(executor) {
 }
 
 StatePromise.prototype = Promise.prototype;
-
-defineProperties(StatePromise, {
-    [Symbol.hasInstance](target) {
-        return Array.isArray(target) && sym_tracked in target;
+Object.defineProperty(StatePromise, Symbol.hasInstance, {
+    value: function isStatePromise(target) {
+        return target instanceof Promise && sym_tracked in target;
     },
+    writable: true,
+    enumerable: true,
+    configurable: true,
+});
+Object.assign(StatePromise, {
     use(target) {
         if (!(target instanceof Promise)) throw new TypeError("target is not a Promise");
         track(target);
