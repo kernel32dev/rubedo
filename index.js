@@ -1331,7 +1331,11 @@ defineProperties(StateObject, {
         return track(Object.fromEntries.apply(Object, arguments));
     },
     create: function create() {
-        return track(Object.create.apply(Object, arguments));
+        const value = Object.create.apply(Object, arguments);
+        const proxy = new Proxy(value, StateObjectProxyHandler);
+        Object.defineProperty(value, sym_ders, { value: { __proto__: null } });
+        Object.defineProperty(value, sym_tracked, { value: proxy });
+        return proxy;
     },
     groupBy: function groupBy() {
         return track(Object.groupBy.apply(Object, arguments));
