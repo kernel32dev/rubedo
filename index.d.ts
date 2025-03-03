@@ -178,9 +178,22 @@ export const Derived: {
          * - **length** - returns the length of the array
          * - **item** - returns the value of the item at the specified index or `Derived.Array.empty` to indicate an empty slot
          * - **has** - (optional) returns true if the index is present, by default calls item and checks if it returned `Derived.Array.empty`
+         * - **symbol** - (optional) returns the symbol that represents the slot, or undefined if the specified index is after the end of the array
+         * - **symbols** - (optional) returns all the symbol that represents the slots as of currently, used to avoid having to call symbol in a loop when all symbols are needed
          * - **use** - (optional) use the entire array, "use" as in add a dependency of the current derivator to the entire array
+         *
+         * if `symbol` is implemented, then symbols may passed as the index to `item` and `has`, essentially, symbols represent the slot itself as it is shifted around the derived array
+         *
+         * this gives consumers a way to track the slots of an array accross mutations
+         *
+         * for example if you have an array of length 1 where the first item returns a particular symbol,
+         * if an item were inserted at the beggining, making the first item now the second item, it should still return that particular symbol,
+         * if the now second item were removed, then the methods `item` and `has` with the symbol should report that is does not exist (by returning `Derived.Array.empty` and false respectively)
+         *
+         * if you don't implement `symbol`, then `item` and `has` will never be called with a symbol for the index
          */
-        proxy<T, I>(target: T, handler: Derived.Array.ProxyHandler<T, I>): T[];
+        proxy<T, H extends Derived.Array.ProxyHandlerWithoutSymbol<T>>(target: T, handler: H): Exclude<ReturnType<H["item"]>, typeof Derived.Array.empty>[];
+        proxy<T, H extends Derived.Array.ProxyHandler<T>>(target: T, handler: H): Exclude<ReturnType<H["item"]>, typeof Derived.Array.empty>[];
 
         /** **Summary**: creates a derived array from a range from 0 up to the specified length exclusive, optionally transformed with a function first, and with the length possibly being derived from somewhere else
          *
@@ -233,11 +246,20 @@ export namespace Derived {
     type Array<T> = globalThis.Array<T>;
     namespace Array {
         /** **Summary**: inteface used to create derived arrays - see `Derived.Array.proxy` for more information */
-        interface ProxyHandler<T, I> {
-            length(this: ProxyHandler<T, I>, target: T): number;
-            item(this: ProxyHandler<T, I>, target: T, index: number): I | typeof Derived.Array.empty;
-            has?(this: ProxyHandler<T, I>, target: T, index: number): boolean;
-            use?(this: ProxyHandler<T, I>, target: T): void;
+        interface ProxyHandlerWithoutSymbol<T> {
+            length(this: ProxyHandlerWithoutSymbol<T>, target: T): number;
+            item(this: ProxyHandlerWithoutSymbol<T>, target: T, index: number): unknown | typeof Derived.Array.empty;
+            has?(this: ProxyHandlerWithoutSymbol<T>, target: T, index: number): boolean;
+            use?(this: ProxyHandlerWithoutSymbol<T>, target: T): void;
+        }
+        /** **Summary**: inteface used to create derived arrays - see `Derived.Array.proxy` for more information */
+        interface ProxyHandler<T> {
+            length(this: ProxyHandler<T>, target: T): number;
+            item(this: ProxyHandler<T>, target: T, index: number | symbol): unknown | typeof Derived.Array.empty;
+            has?(this: ProxyHandler<T>, target: T, index: number | symbol): boolean;
+            symbol(this: ProxyHandler<T>, target: T, index: number): symbol | undefined;
+            symbols(this: ProxyHandler<T>, target: T): symbol[];
+            use?(this: ProxyHandler<T>, target: T): void;
         }
     }
 }
@@ -466,7 +488,7 @@ export const State: {
      * **Reference**: creates a new array with the correct prototype and already wrapped in a proxy
      */
     Array: {
-        new (arrayLength?: number): any[];
+        new(arrayLength?: number): any[];
         new <T>(arrayLength: number): T[];
         new <T>(...items: T[]): T[];
         (arrayLength?: number): any[];
@@ -767,7 +789,35 @@ export const Signal: {
 
 declare global {
     interface Array<T> {
-        /** creates a new mapped array, whose values are automatically kept up to date, by calling the function whenever dependencies change and are needed
+        /** gets the symbol that represents this slot, returns undefined if the index is out of range or if slots are not tracked with symbols
+         *
+         * the `$` indicates this is a method added by rubedo-state
+         */
+        $slot(index: number): symbol | undefined;
+        /** returns all the symbol that represents the slots as of currently, use this instead of calling symbol in a loop when all symbols are needed
+         *
+         * the `$` indicates this is a method added by rubedo-state
+         */
+        $slots(): (symbol | undefined)[];
+        /** gets an item by symbol returns `Derived.Array.empty` if no slot is being tracked with that symbol
+         *
+         * the `$` indicates this is a method added by rubedo-state
+         */
+        $slotValue(index: symbol): T | typeof Derived.Array.empty;
+        /** returns true if a slot is being tracked with that symbol
+         *
+         * the `$` indicates this is a method added by rubedo-state
+         */
+        $slotExists(index: symbol): boolean;
+        /** uses this entire array, adding it in its entirety as a dependency of the current derivator
+         *
+         * the `$` indicates this is a method added by rubedo-state
+         */
+        $use(): void;
+
+        /** TODO! update this documentation
+         *
+         * creates a new mapped array, whose values are automatically kept up to date, by calling the function whenever dependencies change and are needed
          *
          * this is a special derived function that works with derived objects, and is not exactly equivalent to its non deriving counterpart
          *
@@ -779,8 +829,8 @@ declare global {
          *
          * the `$` indicates this is a method added by rubedo-state
          */
-        $map<U>(derivator: (value: T, index: Derived<number>, array: T[]) => U): U[];
-        $map<U, This>(derivator: (this: This, value: T, index: Derived<number>, array: T[]) => U, thisArg: This): U[];
+        $map<U>(derivator: (value: T) => U): U[];
+        $map<U, This>(derivator: (this: This, value: T) => U, thisArg: This): U[];
     }
     interface Promise<T> {
         /** returns true if this promise is already resolved (has `$value`)

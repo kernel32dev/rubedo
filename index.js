@@ -3,6 +3,8 @@
 
 // TODO! replace creation of objects followed by `Object.setPrototypeOf` with `Reflect.construct`
 
+// TODO! in arrays checking if the item exists often creates a full dependency on the value, fix that or state somewhere that this is not a problem
+
 //#region symbols
 
 // TODO! organize the symbols and don't share them unless necessary
@@ -26,6 +28,9 @@ const sym_ders = Symbol("ders");
  *
  * will be used by deriving functions that do not rely on the position of the element
  */
+const sym_ders_slots = Symbol("ders_slots");
+
+/** the symbols that represent the identity of the slots in this array, present on all `StateArray` */
 const sym_slots = Symbol("slots");
 
 /** the derivations of the array's length, present on all `StateArray` */
@@ -166,7 +171,8 @@ const sym_empty = Symbol("empty");
 /** StateArray
  * @typedef {any[] & {
  *     [sym_ders]: Set<WeakRef<Derived>>[],
- *     [sym_slots]: Set<WeakRef<Derived>>[],
+ *     [sym_ders_slots]: Set<WeakRef<Derived>>[],
+ *     [sym_slots]: symbol[],
  *     [sym_len]: Set<WeakRef<Derived>>,
  *     [sym_all]: Set<WeakRef<Derived>>,
  *     [sym_value]: StateArray,
@@ -961,6 +967,13 @@ function invalidateDerivationList(arr) {
 //#endregion
 //#region utils
 
+/**
+ * @template T
+ * @template P
+ * @param {T} target 
+ * @param {P} properties 
+ * @returns {T & P}
+ */
 function defineProperties(target, properties) {
     for (const key in properties) {
         Object.defineProperty(target, key, { writable: true, configurable: true, value: properties[key] });
@@ -1050,6 +1063,7 @@ function track(value) {
         const length = value.length || 0;
         Object.setPrototypeOf(value, StateArrayPrototype);
         Object.defineProperty(value, sym_ders, { value: Array(length) });
+        Object.defineProperty(value, sym_ders_slots, { value: Array(length) });
         Object.defineProperty(value, sym_slots, { value: Array(length) });
         Object.defineProperty(value, sym_len, { value: new Set() });
         Object.defineProperty(value, sym_all, { value: new Set() });
@@ -1334,103 +1348,51 @@ const DerivedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
     reverse() { mutationOnDerivedArray(); },
     copyWithin() { mutationOnDerivedArray(); },
     fill() { mutationOnDerivedArray(); },
+    $slot(index) {
+        const i = as_index(index);
+        if (i === undefined) throw new RangeError("argument is not a valid index: " + index);
+        return this[sym_handler].symbol && this[sym_handler].symbol(this[sym_target], i);
+    },
+    $slots() {
+        const handler = this[sym_handler];
+        if (handler.symbols) return handler.symbols(this[sym_target]);
+        if (handler.symbol) {
+            const target = this[sym_target];
+            const length = this.length;
+            const arr = Array(length);
+            for (let i = 0; i < length; i++) {
+                arr[i] = handler.symbol(target, i);
+            }
+            return arr;
+        }
+        return Array(length);
+    },
+    $slotValue(index) {
+        if (typeof index != "symbol") throw new TypeError("argument is not a symbol");
+        return this[sym_handler].symbol && this[sym_handler].item(this[sym_target], index);
+    },
+    $slotExists(index) {
+        if (typeof index != "symbol") throw new TypeError("argument is not a symbol");
+        return !!(this[sym_handler].symbol && this[sym_handler].has(this[sym_target], index));
+    },
+    $use() {
+        if (this[sym_handler].use) {
+            this[sym_handler].use();
+        } else {
+            const length = this.length;
+            for (let i = 0; i < length; i++) {
+                void this[i];
+            }
+        }
+    },
+    $map(derivator, thisArg) {
+        return createDerivedArray({
+            fn: thisArg ? derivator.bind(thisArg) : derivator,
+            src: this,
+            map: new WeakMap(),
+        }, mapArrayProxyHandler);
+    },
 });
-
-DerivedArray.prototype = DerivedArrayPrototype;
-
-/** @type {import(".").Derived.Array.ProxyHandler<number, number>} */
-const constantLengthRangeArrayProxyHandler = {
-    length(length) {
-        return length;
-    },
-    item(length, index) {
-        return index < length ? index : sym_empty;
-    },
-    has(length, index) {
-        return index < length;
-    },
-    use() { },
-};
-
-/** @type {import(".").Derived.Array.ProxyHandler<import(".").Derived<any>, number>} */
-const derivedLengthRangeArrayProxyHandler = {
-    length(length) {
-        return validate_length(length());
-    },
-    item(length, index) {
-        return index < validate_length(length()) ? index : sym_empty;
-    },
-    has(length, index) {
-        return index < validate_length(length());
-    },
-    use(length) {
-        validate_length(length());
-    },
-};
-
-/** @type {import(".").Derived.Array.ProxyHandler<(import(".").Derived<any> | undefined)[] & { fn: (index: number) => any }, any>} */
-const constantLengthMappedRangeArrayProxyHandler = {
-    length(target) {
-        return target.length;
-    },
-    item(target, index) {
-        if (index >= target.length) return sym_empty
-        const value = (
-            target[index] || (target[index] = new Derived(function mappedRangeItem() {
-                return (0, target.fn)(index);
-            }))
-        )();
-        if (value == sym_empty) throw new TypeError("Derived.Array.range fn returned Derived.Array.empty");
-        return value;
-    },
-    has(target, index) {
-        return index < target.length;
-    },
-    use(target) {
-        const length = target.length;
-        const fn = target.fn;
-        for (let i = 0; i < length; i++) {
-            const index = i;
-            if (sym_empty == (
-                target[index] || (target[index] = new Derived(function mappedRangeItem() {
-                    return (0, target.fn)(index);
-                }))
-            )()) throw new TypeError("Derived.Array.range fn returned Derived.Array.empty");
-        }
-    },
-};
-
-/** @type {import(".").Derived.Array.ProxyHandler<(import(".").Derived<any> | undefined)[] & { len: import(".").Derived<any>, fn: (index: number) => any }, any>} */
-const derivedLengthMappedRangeArrayProxyHandler = {
-    length(target) {
-        return target.length = validate_length(target.len());
-    },
-    item(target, index) {
-        if (index >= (target.length = validate_length(target.len()))) return sym_empty
-        const value = (
-            target[index] || (target[index] = new Derived(function mappedRangeItem() {
-                return (0, target.fn)(index);
-            }))
-        )();
-        if (value == sym_empty) throw new TypeError("Derived.Array.range fn returned Derived.Array.empty");
-        return value;
-    },
-    has(target, index) {
-        return index < (target.length = validate_length(target.len()));
-    },
-    use(target) {
-        const length = (target.length = validate_length(target.len()));
-        const fn = target.fn;
-        for (let i = 0; i < length; i++) {
-            const index = i;
-            if (sym_empty == (
-                target[index] || (target[index] = new Derived(function mappedRangeItem() {
-                    return (0, target.fn)(index);
-                }))
-            )()) throw new TypeError("Derived.Array.range fn returned Derived.Array.empty");
-        }
-    },
-};
 
 defineProperties(DerivedArray, {
     proxy(target, handler) {
@@ -1456,14 +1418,7 @@ defineProperties(DerivedArray, {
     empty: sym_empty,
 });
 
-/** @type {ProxyHandler<StateArray>} */
-const OldDerivedArrayProxyHandler = {
-    defineProperty() { mutationOnDerivedArray(); },
-    deleteProperty() { mutationOnDerivedArray(); },
-    set() { mutationOnDerivedArray(); },
-    setPrototypeOf() { mutationOnDerivedArray(); },
-    preventExtensions() { mutationOnDerivedArray(); },
-};
+DerivedArray.prototype = DerivedArrayPrototype;
 
 /** @type {ProxyHandler<{[sym_handler]: import(".").Derived.Array.ProxyHandler, [sym_target]: any[]}>} */
 const DerivedArrayProxyHandler = {
@@ -1559,6 +1514,146 @@ function validate_length(length) {
     if (typeof length == "number" && length >= 0 && length <= 0xFFFFFFFF && Number.isInteger(length)) return length;
     throw new RangeError("Derived Array Proxy length method returned an invalid value: " + length);
 }
+
+//#endregion
+//#region derived range array
+
+/** @type {import(".").Derived.Array.ProxyHandlerWithoutSymbol<number>} */
+const constantLengthRangeArrayProxyHandler = {
+    length(length) {
+        return length;
+    },
+    item(length, index) {
+        return index < length ? index : sym_empty;
+    },
+    has(length, index) {
+        return index < length;
+    },
+    use() { },
+};
+
+/** @type {import(".").Derived.Array.ProxyHandlerWithoutSymbol<import(".").Derived<any>>} */
+const derivedLengthRangeArrayProxyHandler = {
+    length(length) {
+        return validate_length(length());
+    },
+    item(length, index) {
+        return index < validate_length(length()) ? index : sym_empty;
+    },
+    has(length, index) {
+        return index < validate_length(length());
+    },
+    use(length) {
+        validate_length(length());
+    },
+};
+
+/** @type {import(".").Derived.Array.ProxyHandlerWithoutSymbol<(import(".").Derived<any> | undefined)[] & { fn: (index: number) => any }>} */
+const constantLengthMappedRangeArrayProxyHandler = {
+    length(target) {
+        return target.length;
+    },
+    item(target, index) {
+        if (index >= target.length) return sym_empty
+        const value = (
+            target[index] || (target[index] = new Derived(function mappedRangeItem() {
+                return (0, target.fn)(index);
+            }))
+        )();
+        if (value == sym_empty) throw new TypeError("Derived.Array.range fn returned Derived.Array.empty");
+        return value;
+    },
+    has(target, index) {
+        return index < target.length;
+    },
+    use(target) {
+        const length = target.length;
+        const fn = target.fn;
+        for (let i = 0; i < length; i++) {
+            const index = i;
+            if (sym_empty == (
+                target[index] || (target[index] = new Derived(function mappedRangeItem() {
+                    return (0, target.fn)(index);
+                }))
+            )()) throw new TypeError("Derived.Array.range fn returned Derived.Array.empty");
+        }
+    },
+};
+
+/** @type {import(".").Derived.Array.ProxyHandlerWithoutSymbol<(import(".").Derived<any> | undefined)[] & { len: import(".").Derived<any>, fn: (index: number) => any }>} */
+const derivedLengthMappedRangeArrayProxyHandler = {
+    length(target) {
+        return target.length = validate_length(target.len());
+    },
+    item(target, index) {
+        if (index >= (target.length = validate_length(target.len()))) return sym_empty;
+        const value = (
+            target[index] || (target[index] = new Derived(function mappedRangeItem() {
+                return (0, target.fn)(index);
+            }))
+        )();
+        if (value == sym_empty) throw new TypeError("Derived.Array.range fn returned Derived.Array.empty");
+        return value;
+    },
+    has(target, index) {
+        return index < (target.length = validate_length(target.len()));
+    },
+    use(target) {
+        const length = (target.length = validate_length(target.len()));
+        const fn = target.fn;
+        for (let i = 0; i < length; i++) {
+            const index = i;
+            if (sym_empty == (
+                target[index] || (target[index] = new Derived(function mappedRangeItem() {
+                    return (0, target.fn)(index);
+                }))
+            )()) throw new TypeError("Derived.Array.range fn returned Derived.Array.empty");
+        }
+    },
+};
+
+//#endregion
+//#region derived map array
+
+/** @type {import(".").Derived.Array.ProxyHandler<{ src: any[], fn(item: any): any, map: WeakMap<symbol, import(".").Derived<any>> }>} */
+const mapArrayProxyHandler = {
+    length(target) {
+        return target.src.length;
+    },
+    item(target, index) {
+        if (typeof index == "number") {
+            index = target.src.$slot(index);
+            if (!index) return undefined;
+        }
+        let derived = target.map.get(index);
+        if (!derived) {
+            target.map.set(index, derived = new Derived(function mapItem() {
+                const value = target.src.$slotValue(index);
+                if (value === sym_empty) throw new Error("attempted to evaluate mapItem with a symbol from a slot that no longer exists");
+                return (0, target.fn)(value);
+            }));
+        }
+        return derived();
+    },
+    has(target, index) {
+        return typeof index == "symbol" ? target.src.$slotExists(index) : index in target.src;
+    },
+    symbol(target, index) {
+        return target.src.$slot(index);
+    },
+    symbols(target) {
+        return target.src.$slots();
+    },
+    use(target) {
+        target.src.$use();
+        const slots = target.src.$slots();
+        const length = slots.length;
+        for (let i = 0; i < length; i++) {
+            const derived = target.map.get(index);
+            if (derived) derived();
+        }
+    },
+};
 
 //#endregion
 //#region state object
@@ -1761,6 +1856,7 @@ function StateArray() {
     const proxy = new Proxy(value, StateArrayProxyHandler);
     const length = value.length || 0;
     Object.defineProperty(value, sym_ders, { value: Array(length) });
+    Object.defineProperty(value, sym_ders_slots, { value: Array(length) });
     Object.defineProperty(value, sym_slots, { value: Array(length) });
     Object.defineProperty(value, sym_len, { value: new Set() });
     Object.defineProperty(value, sym_all, { value: new Set() });
@@ -1798,6 +1894,7 @@ const StateArrayPrototype = defineProperties({ __proto__: DerivedArrayPrototype 
             Array.prototype.push.apply(target, arguments);
             const length = target.length;
             target[sym_ders].length = length;
+            target[sym_ders_slots].length = length;
             target[sym_slots].length = length;
             invalidateDerivationSet(target[sym_len]);
             invalidateDerivationSet(target[sym_all]);
@@ -1810,6 +1907,7 @@ const StateArrayPrototype = defineProperties({ __proto__: DerivedArrayPrototype 
         const result = Array.prototype.pop.call(target);
         const length = target.length;
         target[sym_ders].length = length;
+        target[sym_ders_slots].length = length;
         target[sym_slots].length = length;
         invalidateDerivationSet(target[sym_len]);
         invalidateDerivationSet(target[sym_all]);
@@ -1824,6 +1922,7 @@ const StateArrayPrototype = defineProperties({ __proto__: DerivedArrayPrototype 
             Array.prototype.unshift.apply(target, arguments);
             const args = Array(arguments.length);
             Array.prototype.unshift.apply(target[sym_ders], args);
+            Array.prototype.unshift.apply(target[sym_ders_slots], args);
             Array.prototype.unshift.apply(target[sym_slots], args);
             invalidateDerivationList(target[sym_ders]);
             invalidateDerivationSet(target[sym_len]);
@@ -1836,7 +1935,8 @@ const StateArrayPrototype = defineProperties({ __proto__: DerivedArrayPrototype 
         if (!target.length) return;
         const result = Array.prototype.shift.call(target);
         const last = target[sym_ders].pop();
-        const first = target[sym_slots].shift();
+        const first = target[sym_ders_slots].shift();
+        target[sym_slots].shift();
         invalidateDerivationList(target[sym_ders]);
         invalidateDerivationSet(last);
         invalidateDerivationSet(first);
@@ -1855,10 +1955,11 @@ const StateArrayPrototype = defineProperties({ __proto__: DerivedArrayPrototype 
             const deleteCount = arguments[1] = normalize_length(arguments[1], length - start);
             const delta = arguments.length - deleteCount - 2;
             const result = Array.prototype.splice.apply(target, arguments);
+            // TAG1: should mutations set sym_slots with new symbols? (by clearing the slots)
             for (let i = start; i < start + deleteCount; i++) {
                 invalidateDerivationSet(target[sym_ders][i]);
-                invalidateDerivationSet(target[sym_slots][i]);
-                delete target[sym_slots][i];
+                invalidateDerivationSet(target[sym_ders_slots][i]);
+                delete target[sym_ders_slots][i];
             }
             if (delta != 0) {
                 for (let i = start + deleteCount; i < length; i++) {
@@ -1866,8 +1967,12 @@ const StateArrayPrototype = defineProperties({ __proto__: DerivedArrayPrototype 
                 }
                 target[sym_ders].length += delta;
                 if (delta > 0) {
-                    target[sym_slots].splice(start, start + deleteCount, ...Array(delta));
+                    const empty_slots = Array(delta);
+                    empty_slots.unshift(start, 0);
+                    Array.prototype.splice.apply(target[sym_ders_slots], empty_slots);
+                    Array.prototype.splice.apply(target[sym_slots], empty_slots);
                 } else {
+                    target[sym_ders_slots].splice(start, -delta);
                     target[sym_slots].splice(start, -delta);
                 }
                 invalidateDerivationSet(target[sym_len]);
@@ -1880,7 +1985,8 @@ const StateArrayPrototype = defineProperties({ __proto__: DerivedArrayPrototype 
                 return Array.prototype.splice.call(target, start);
             }
             const ders = target[sym_ders].splice(new_length);
-            const slots = target[sym_slots].splice(new_length);
+            const slots = target[sym_ders_slots].splice(new_length);
+            target[sym_slots].length = new_length;
             target.length = new_length;
             const result = Array.prototype.splice.call(target, start);
             invalidateDerivationList(ders);
@@ -1908,10 +2014,12 @@ const StateArrayPrototype = defineProperties({ __proto__: DerivedArrayPrototype 
         }
         if (any) {
             const copy = Array.from(target);
+            const copy_ders_slots = Array.from(target[sym_ders_slots]);
             const copy_slots = Array.from(target[sym_slots]);
             for (let i = 0; i < length; i++) {
                 const ii = map[i];
                 target[i] = copy[ii];
+                target[sym_ders_slots][i] = copy_ders_slots[ii];
                 target[sym_slots][i] = copy_slots[ii];
             }
             invalidateDerivationSet(target[sym_all]);
@@ -1921,6 +2029,7 @@ const StateArrayPrototype = defineProperties({ __proto__: DerivedArrayPrototype 
     reverse() {
         const target = /** @type {StateArray} */ (this[sym_value]);
         Array.prototype.reverse.call(target);
+        target[sym_ders_slots].reverse();
         target[sym_slots].reverse();
         invalidateDerivationList(target[sym_ders]);
         invalidateDerivationSet(target[sym_len]);
@@ -1937,10 +2046,11 @@ const StateArrayPrototype = defineProperties({ __proto__: DerivedArrayPrototype 
         src_end = normalize_end(src_end, length);
         let dest_end = dest + src_end - src;
         dest_end = dest_end < length ? dest_end : length;
+        // TAG1: should mutations set sym_slots with new symbols? (by clearing the slots)
         for (let i = dest; i < dest_end; i++) {
             invalidateDerivationSet(target[sym_ders][i]);
-            invalidateDerivationSet(target[sym_slots][i]);
-            delete target[sym_slots][i];
+            invalidateDerivationSet(target[sym_ders_slots][i]);
+            delete target[sym_ders_slots][i];
         }
         return this;
     },
@@ -1950,16 +2060,83 @@ const StateArrayPrototype = defineProperties({ __proto__: DerivedArrayPrototype 
         if (!length) return this;
         start = normalize_start(start, length);
         end = normalize_end(end, length);
+        // TAG1: should mutations set sym_slots with new symbols? (by clearing the slots)
         for (let i = start; i < end; i++) {
             invalidateDerivationSet(target[sym_ders][i]);
-            invalidateDerivationSet(target[sym_slots][i]);
-            delete target[sym_slots][i];
+            invalidateDerivationSet(target[sym_ders_slots][i]);
+            delete target[sym_ders_slots][i];
         }
         return this;
     },
 
+    $slot(index) {
+        const i = as_index(index);
+        if (i === undefined) throw new RangeError("argument is not a valid index: " + index);
+        const target = /** @type {StateArray} */ (this[sym_value]);
+        const slots = target[sym_slots];
+        if (prepareUseTracked()) {
+            if (i < target.length) {
+                const slots = target[sym_ders_slots];
+                let set = slots[i];
+                if (!set) slots[i] = set = new Set();
+                set.add(current_derived);
+                return slots[i] || (slots[i] = Symbol());
+            } else {
+                target[sym_len].add(current_derived);
+            }
+        } else {
+            if (i < target.length) {
+                return slots[i] || (slots[i] = Symbol());
+            }
+        }
+    },
+    $slots() {
+        const target = /** @type {StateArray} */ (this[sym_value]);
+        if (prepareUseTracked()) {
+            target[sym_all].add(current_derived);
+        }
+        const length = target.length;
+        const slots = target[sym_slots];
+        for (let i = 0; i < length; i++) {
+            if (!slots[i]) slots[i] = Symbol();
+        }
+        return Array.from(slots);
+    },
+    $slotValue(index) {
+        if (typeof index != "symbol") throw new TypeError("argument is not a symbol");
+        const target = /** @type {StateArray} */ (this[sym_value]);
+        const i = target[sym_slots].indexOf(index);
+        if (i == -1) return sym_empty;
+        if (prepareUseTracked()) {
+            const slots = target[sym_ders_slots];
+            let set = slots[i];
+            if (!set) slots[i] = set = new Set();
+            set.add(current_derived);
+        }
+        return target[i];
+    },
+    $slotExists(index) {
+        if (typeof index != "symbol") throw new TypeError("argument is not a symbol");
+        const target = /** @type {StateArray} */ (this[sym_value]);
+        const i = target[sym_slots].indexOf(index);
+        if (i == -1) return false;
+        if (prepareUseTracked()) {
+            const slots = target[sym_ders_slots];
+            let set = slots[i];
+            if (!set) slots[i] = set = new Set();
+            set.add(current_derived);
+        }
+        return true;
+    },
+    $use() {
+        if (prepareUseTracked()) {
+            this[sym_value][sym_all].add(current_derived);
+        }
+    },
+
     $map(derivator, thisArg) {
-        throw new Error("TODO! implement $map");
+        // TODO! optimize $map for the state array or remove this method to let it come from the parent prototype
+        return DerivedArrayPrototype.$map.call(this, derivator, thisArg);
     },
 });
 
@@ -1982,17 +2159,17 @@ const StateArrayProxyHandler = {
             if (new_length > old_length) {
                 target.length = new_length;
                 target[sym_ders].length = new_length;
-                target[sym_slots].length = new_length;
+                target[sym_ders_slots].length = new_length;
                 const result = Reflect.defineProperty(target, property, attributes);
                 invalidateDerivationSet(target[sym_len]);
                 invalidateDerivationSet(target[sym_all]);
                 return result;
             } else if (new_length < old_length) {
                 const ders = target[sym_ders].slice(new_length);
-                const slots = target[sym_slots].slice(new_length);
+                const slots = target[sym_ders_slots].slice(new_length);
                 target.length = new_length;
                 target[sym_ders].length = new_length;
-                target[sym_slots].length = new_length;
+                target[sym_ders_slots].length = new_length;
                 const result = Reflect.defineProperty(target, property, attributes);
                 invalidateDerivationList(ders);
                 invalidateDerivationList(slots);
@@ -2011,12 +2188,13 @@ const StateArrayProxyHandler = {
             if (target.length <= index) {
                 target.length = index + 1;
                 target[sym_ders].length = index + 1;
-                target[sym_slots].length = index + 1;
+                target[sym_ders_slots].length = index + 1;
                 length_updated = true;
             }
             const result = Reflect.defineProperty(target, property, attributes);
+            // TAG1: should mutations set sym_slots with new symbols? (by clearing the slots)
             invalidateDerivationSet(target[sym_ders][index]);
-            invalidateDerivationSet(target[sym_slots][index]);
+            invalidateDerivationSet(target[sym_ders_slots][index]);
             if (length_updated) invalidateDerivationSet(target[sym_len]);
             invalidateDerivationSet(target[sym_all]);
             return result;
@@ -2031,7 +2209,7 @@ const StateArrayProxyHandler = {
         if (index !== undefined && index < target.length) {
             const result = Reflect.deleteProperty(target, p);
             invalidateDerivationSet(target[sym_ders][index]);
-            invalidateDerivationSet(target[sym_slots][index]);
+            invalidateDerivationSet(target[sym_ders_slots][index]);
             invalidateDerivationSet(target[sym_all]);
             return result;
         }
@@ -2072,14 +2250,14 @@ const StateArrayProxyHandler = {
             if (new_length > old_length) {
                 target.length = new_length;
                 target[sym_ders].length = new_length;
-                target[sym_slots].length = new_length;
+                target[sym_ders_slots].length = new_length;
                 const result = Reflect.set(target, p, newValue, target);
                 invalidateDerivationSet(target[sym_len]);
                 invalidateDerivationSet(target[sym_all]);
                 return result;
             } else if (new_length < old_length) {
                 const ders = target[sym_ders].splice(new_length);
-                const slots = target[sym_slots].splice(new_length);
+                const slots = target[sym_ders_slots].splice(new_length);
                 target.length = new_length;
                 const result = Reflect.set(target, p, newValue, target);
                 invalidateDerivationList(ders);
@@ -2098,12 +2276,13 @@ const StateArrayProxyHandler = {
             if (target.length <= index) {
                 target.length = index + 1;
                 target[sym_ders].length = index + 1;
-                target[sym_slots].length = index + 1;
+                target[sym_ders_slots].length = index + 1;
                 length_updated = true;
             }
             const result = Reflect.set(target, p, newValue, target);
+            // TAG1: should mutations set sym_slots with new symbols? (by clearing the slots)
             invalidateDerivationSet(target[sym_ders][index]);
-            invalidateDerivationSet(target[sym_slots][index]);
+            invalidateDerivationSet(target[sym_ders_slots][index]);
             if (length_updated) invalidateDerivationSet(target[sym_len]);
             invalidateDerivationSet(target[sym_all]);
             return result;
@@ -2135,7 +2314,7 @@ function stateArrayUseProp(target, prop) {
         if (!set) ders[index] = set = new Set();
         set.add(current_derived);
 
-        const slots = target[sym_slots];
+        const slots = target[sym_ders_slots];
         set = slots[index];
         if (!set) slots[index] = set = new Set();
         set.add(current_derived);
@@ -2516,6 +2695,11 @@ defineProperties(StatePromise, {
 //#region array extensions
 
 defineProperties(Array.prototype, {
+    $slot() {},
+    $slots() { return Array(this.length); },
+    $slotValue() { return sym_empty; },
+    $slotExists() { return false; },
+    $use() {},
     $map(derivator, thisArg) {
         return this.map(callbackfn, thisArg);
         function callbackfn(value, number, array) {

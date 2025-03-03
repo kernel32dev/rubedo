@@ -726,33 +726,30 @@ describe("tracked array", () => {
         arr[0] = 3;
         expect(derived()).toEqual(["3"]);
     });
-    test.todo("derived map works");
-    // $map is not 
-    // test("derived map works", () => {
-    //     const arr = State.track<number[]>([0, 1, 2]);
-    //     const mock = jest.fn(String);
-    //     const derived = arr.$map(mock);
-    //     expect(mock).toHaveBeenCalledTimes(0);
-    //     expect([...derived]).toEqual(["0", "1", "2"]);
-    //     expect(mock).toHaveBeenCalledTimes(3);
-    //     arr[0] = 3;
-    //     expect(mock).toHaveBeenCalledTimes(3);
-    //     expect([...derived]).toEqual(["3", "1", "2"]);
-    //     expect(mock).toHaveBeenCalledTimes(4);
-    // });
-    test.todo("double derived map works");
-    // test("double derived map works", () => {
-    //     const arr = State.track<number[]>([0, 1, 2]);
-    //     const mock = jest.fn(String);
-    //     const derived = arr.$map(mock).$map(Number);
-    //     expect(mock).toHaveBeenCalledTimes(0);
-    //     expect([...derived]).toEqual([0, 1, 2]);
-    //     expect(mock).toHaveBeenCalledTimes(3);
-    //     arr[0] = 3;
-    //     expect(mock).toHaveBeenCalledTimes(3);
-    //     expect([...derived]).toEqual([3, 1, 2]);
-    //     expect(mock).toHaveBeenCalledTimes(4);
-    // });
+    test("derived map works", () => {
+        const arr = State.track<number[]>([0, 1, 2]);
+        const mock = jest.fn(String);
+        const derived = arr.$map(mock);
+        expect(mock).toHaveBeenCalledTimes(0);
+        expect([...derived]).toEqual(["0", "1", "2"]);
+        expect(mock).toHaveBeenCalledTimes(3);
+        arr[0] = 3;
+        expect(mock).toHaveBeenCalledTimes(3);
+        expect([...derived]).toEqual(["3", "1", "2"]);
+        expect(mock).toHaveBeenCalledTimes(4);
+    });
+    test("double derived map works", () => {
+        const arr = State.track<number[]>([0, 1, 2]);
+        const mock = jest.fn(String);
+        const derived = arr.$map(mock).$map(Number);
+        expect(mock).toHaveBeenCalledTimes(0);
+        expect([...derived]).toEqual([0, 1, 2]);
+        expect(mock).toHaveBeenCalledTimes(3);
+        arr[0] = 3;
+        expect(mock).toHaveBeenCalledTimes(3);
+        expect([...derived]).toEqual([3, 1, 2]);
+        expect(mock).toHaveBeenCalledTimes(4);
+    });
     test("derivation notice on clear array", () => {
         const arr = State.track<number[]>([1, 2, 3]);
         const derived = new Derived(() => arr.length);
@@ -839,6 +836,79 @@ describe("tracked array", () => {
 
         arr.push(4);  // Add an item
         expect(derived()).toEqual([4, 3, 2, 1]);
+    });
+});
+
+describe('tracked array symbol tracking', () => {
+    let arr: string[];
+
+    beforeEach(() => {
+        arr = State.Array.from(["a", "b", "c"]);
+        // Assume these symbols are being tracked internally
+        const symA = arr.$slot(0);
+        const symB = arr.$slot(1);
+        const symC = arr.$slot(2);
+        expect(typeof symA).toBe("symbol");
+        expect(typeof symB).toBe("symbol");
+        expect(typeof symC).toBe("symbol");
+    });
+
+    test('Symbols remain consistent after shift', () => {
+        const oldSymB = arr.$slot(1);
+        const oldSymC = arr.$slot(2);
+
+        arr.shift();
+
+        expect(arr.$slot(0)).toBe(oldSymB);
+        expect(arr.$slot(1)).toBe(oldSymC);
+    });
+
+    test('Symbols remain consistent after unshift', () => {
+        const oldSymA = arr.$slot(0);
+        const oldSymB = arr.$slot(1);
+        const oldSymC = arr.$slot(2);
+
+        arr.unshift("x");
+
+        expect(arr.$slot(1)).toBe(oldSymA);
+        expect(arr.$slot(2)).toBe(oldSymB);
+        expect(arr.$slot(3)).toBe(oldSymC);
+    });
+
+    test('Symbols remain consistent after splice (removal)', () => {
+        const oldSymA = arr.$slot(0);
+        const oldSymC = arr.$slot(2);
+
+        arr.splice(1, 1); // Remove "b"
+
+        expect(arr.$slot(0)).toBe(oldSymA);
+        expect(arr.$slot(1)).toBe(oldSymC);
+    });
+
+    test('Symbols remain consistent after splice (insertion)', () => {
+        const oldSymA = arr.$slot(0);
+        const oldSymB = arr.$slot(1);
+        const oldSymC = arr.$slot(2);
+
+        arr.splice(1, 0, "x"); // Insert "x" at index 1
+
+        expect(arr.$slot(0)).toBe(oldSymA);
+        expect(arr.$slot(2)).toBe(oldSymB);
+        expect(arr.$slot(3)).toBe(oldSymC);
+    });
+
+    test('$slotItem and $slotHas function correctly', () => {
+        const symA = arr.$slot(0)!;
+        const symB = arr.$slot(1)!;
+        const symC = arr.$slot(2)!;
+
+        expect(arr.$slotValue(symA)).toBe("a");
+        expect(arr.$slotValue(symB)).toBe("b");
+        expect(arr.$slotValue(symC)).toBe("c");
+
+        expect(arr.$slotExists(symA)).toBe(true);
+        expect(arr.$slotExists(symB)).toBe(true);
+        expect(arr.$slotExists(symC)).toBe(true);
     });
 });
 
