@@ -187,7 +187,6 @@ export const Derived: {
          * - **item** - returns the value of the item at the specified index or `Derived.Array.empty` to indicate an empty slot
          * - **has** - (optional) returns true if the index is present, by default calls item and checks if it returned `Derived.Array.empty`
          * - **use** - (optional) use the entire array, "use" as in add a dependency of the current derivator to the entire array
-         *
          */
         proxy<T, I>(target: T, handler: Derived.Array.ProxyHandler<T, I>): T[];
 
@@ -222,7 +221,7 @@ export namespace Derived {
      *
      * is is safe to pass a `Derived` to Or, in which case it won't do anything
      */
-    type Or<T> = T extends Derived<infer U> ? T : Derived<T>;
+    type Or<T> = T extends Derived<infer U> ? T : T | Derived<T>;
 
     /** **Summary**: a recursive type alias to help you turn `T`, `Derived<T>` or `Derived<Derived<T>>` into `T` */
     type Use<T> = T extends Derived<infer U> ? Use<U> : T;

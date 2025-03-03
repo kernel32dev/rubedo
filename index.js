@@ -232,8 +232,6 @@ const recursiveFrozenComparisonGuard = new WeakSet();
 //#endregion
 //#region Derived
 
-// TODO! add Derived.cheap and Derived.prototype.cheap
-
 const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
     constructor: Derived,
     now() {
@@ -1047,7 +1045,7 @@ function track(value) {
                 // TODO! wrap the object in a dedicated proxy for objects with untracked properties
             }
         }
-        
+
         const proxy = new Proxy(value, StateArrayProxyHandler);
         const length = value.length || 0;
         Object.setPrototypeOf(value, StateArrayPrototype);
@@ -2396,7 +2394,7 @@ Object.assign(StatePromise, {
             return obj;
         }
         let f, r;
-        const p = new Promise<T>((resolve, reject) => { f = resolve; r = reject; });
+        const p = new Promise((resolve, reject) => { f = resolve; r = reject; });
         if (!f || !r) throw new Error("StatePromise.withResolvers polyfill failed because the Promise constructor did not run the executor synchronously");
         return {
             promise: track(p),
