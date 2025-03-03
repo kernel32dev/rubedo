@@ -1298,6 +1298,22 @@ function mutationOnDerivedArray() {
     throw new TypeError("cannot mutate derived array");
 }
 
+/**
+ * @template T
+ * @param {T} target 
+ * @param {import(".").Derived.Array.ProxyHandler<T, any>} handler 
+ * @returns 
+ */
+function createDerivedArray(target, handler) {
+    const target2 = [];
+    const proxy = new Proxy(target2, DerivedArrayProxyHandler);
+    Object.setPrototypeOf(target2, DerivedArrayPrototype);
+    target2[sym_target] = target;
+    target2[sym_handler] = handler;
+    target2[sym_tracked] = proxy;
+    return proxy;
+}
+
 function DerivedArray() {
     // return StateArray instances and not DerivedArray instances,
     // this serves as a constructor with a different name for the DerivedArrayPrototype for better debugging
@@ -1320,15 +1336,120 @@ const DerivedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
 
 DerivedArray.prototype = DerivedArrayPrototype;
 
+/** @type {import(".").Derived.Array.ProxyHandler<number, number>} */
+const constantLengthRangeArrayProxyHandler = {
+    length(length) {
+        return length;
+    },
+    item(length, index) {
+        return index < length ? index : sym_empty;
+    },
+    has(length, index) {
+        return index < length;
+    },
+    use() { },
+};
+
+/** @type {import(".").Derived.Array.ProxyHandler<import(".").Derived<any>, number>} */
+const derivedLengthRangeArrayProxyHandler = {
+    length(length) {
+        return validate_length(length());
+    },
+    item(length, index) {
+        return index < validate_length(length()) ? index : sym_empty;
+    },
+    has(length, index) {
+        return index < validate_length(length());
+    },
+    use(length) {
+        validate_length(length());
+    },
+};
+
+/** @type {import(".").Derived.Array.ProxyHandler<(import(".").Derived<any> | undefined)[] & { fn: (index: number) => any }, any>} */
+const constantLengthMappedRangeArrayProxyHandler = {
+    length(target) {
+        return target.length;
+    },
+    item(target, index) {
+        if (index >= target.length) return sym_empty
+        const value = (
+            target[index] || (target[index] = new Derived(function mappedRangeItem() {
+                return (0, target.fn)(index);
+            }))
+        )();
+        if (value == sym_empty) throw new TypeError("Derived.Array.range fn returned Derived.Array.empty");
+        return value;
+    },
+    has(target, index) {
+        return index < target.length;
+    },
+    use(target) {
+        const length = target.length;
+        const fn = target.fn;
+        for (let i = 0; i < length; i++) {
+            const index = i;
+            if (sym_empty == (
+                target[index] || (target[index] = new Derived(function mappedRangeItem() {
+                    return (0, target.fn)(index);
+                }))
+            )()) throw new TypeError("Derived.Array.range fn returned Derived.Array.empty");
+        }
+    },
+};
+
+/** @type {import(".").Derived.Array.ProxyHandler<(import(".").Derived<any> | undefined)[] & { len: import(".").Derived<any>, fn: (index: number) => any }, any>} */
+const derivedLengthMappedRangeArrayProxyHandler = {
+    length(target) {
+        return target.length = validate_length(target.len());
+    },
+    item(target, index) {
+        if (index >= (target.length = validate_length(target.len()))) return sym_empty
+        const value = (
+            target[index] || (target[index] = new Derived(function mappedRangeItem() {
+                return (0, target.fn)(index);
+            }))
+        )();
+        if (value == sym_empty) throw new TypeError("Derived.Array.range fn returned Derived.Array.empty");
+        return value;
+    },
+    has(target, index) {
+        return index < (target.length = validate_length(target.len()));
+    },
+    use(target) {
+        const length = (target.length = validate_length(target.len()));
+        const fn = target.fn;
+        for (let i = 0; i < length; i++) {
+            const index = i;
+            if (sym_empty == (
+                target[index] || (target[index] = new Derived(function mappedRangeItem() {
+                    return (0, target.fn)(index);
+                }))
+            )()) throw new TypeError("Derived.Array.range fn returned Derived.Array.empty");
+        }
+    },
+};
+
 Object.assign(DerivedArray, {
     proxy(target, handler) {
-        const target2 = [];
-        const proxy = new Proxy(target2, DerivedArrayProxyHandler);
-        Object.setPrototypeOf(target2, DerivedArrayPrototype);
-        target2[sym_target] = target;
-        target2[sym_handler] = handler;
-        target2[sym_tracked] = proxy;
-        return proxy;
+        return createDerivedArray(target, handler);
+    },
+    range(length, fn) {
+        if (!fn) {
+            return length instanceof Derived
+                ? createDerivedArray(length, derivedLengthRangeArrayProxyHandler)
+                : createDerivedArray(validate_length(length), constantLengthRangeArrayProxyHandler);
+        }
+        if (length instanceof Derived) {
+            const target = Array(0);
+            target.len = length;
+            target.fn = fn;
+            return createDerivedArray(target, derivedLengthMappedRangeArrayProxyHandler);
+        } else {
+            const target = Array(validate_length(length));
+            target.fn = fn;
+            return createDerivedArray(target, constantLengthMappedRangeArrayProxyHandler);
+        }
     },
     empty: sym_empty,
 });

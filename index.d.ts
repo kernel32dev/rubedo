@@ -161,24 +161,16 @@ export const Derived: {
     cheap<T>(derivator: () => T): Derived<Derived.Use<T>>;
     cheap<T>(name: string, derivator: () => T): Derived<Derived.Use<T>>;
 
-    /** TODO! document this */
+    /** **Summary**: A derived array is an array where its values are not stored in the array but rather somewhere else
+     *
+     * when the values of a derived are read, it runs code to derive it from somewhere else, possibly with memoization, no state (other than caching) is stored on derived arrays
+     *
+     * because of this they are naturally read-only, possibly not immutable, because wherever they are reading their data could change, but they can never be mutated directly
+     *
+     * derived arrays cannot be constructed directly, see `Derived.Array.proxy` or `Derived.Array.range` for examples
+     */
     Array: {
         new(...args: never): never;
-        // TODO! remove this - the following is a draft for adding symbols to the derived array proxy api
-        /** **Summary**: creates an immutable derived array, whose values are derived from handler functions
-         *
-         * the handler object must have the following methods:
-         *
-         * - **length** - returns the length of the array
-         * - **item** - returns the value of the item identified by the particular number or symbol (more on that later)
-         * - **symbol** - (optional) returns the symbol that represents a particular index
-         * - **use** - (optional) use the entire array, "use" as in add a dependency of the current derivator to the entire array
-         *
-         * symbols are used to keep track of the items of an array as it is shifted, spliced, sorted, reversed and whatever other operations shift items
-         *
-         * the idea is that if an item at a particular slot
-         */
-
         /** **Summary**: creates a read-only derived array, whose values are derived from handler functions every time they are read
          *
          * the handler object must have the following methods:
@@ -190,6 +182,18 @@ export const Derived: {
          */
         proxy<T, I>(target: T, handler: Derived.Array.ProxyHandler<T, I>): T[];
 
+        /** **Summary**: creates a derived array from a range from 0 up to the specified length exclusive, optionally transformed with a function first, and with the length possibly being derived from somewhere else
+         *
+         * this allows you to do the equivalent of a for loop in derivations
+         *
+         * the function is executed within a derivation so its safe to depend on data, and expect the resulting array to update automatically
+         *
+         * that also means that calls to fn are memoized and lazy, rerunning only when the value is requested and if dependencies changed
+         */
+        range<T>(length: Derived.Or<number>, fn: (index: number) => T): Derived.Use<T>[];
+        range(length: Derived.Or<number>): number[];
+
+        /** **Summary**: A symbol that represents the absence of an array item, expected to be returned on the `Derived.Array.ProxyHandler.item` when getting items past the array's end or at holes (sparse arrays) */
         readonly empty: unique symbol;
     };
 
@@ -228,16 +232,12 @@ export namespace Derived {
 
     type Array<T> = globalThis.Array<T>;
     namespace Array {
-        /** inteface used to create derived arrays - TODO! finish documenting this */
+        /** **Summary**: inteface used to create derived arrays - see `Derived.Array.proxy` for more information */
         interface ProxyHandler<T, I> {
             length(this: ProxyHandler<T, I>, target: T): number;
             item(this: ProxyHandler<T, I>, target: T, index: number): I | typeof Derived.Array.empty;
             has?(this: ProxyHandler<T, I>, target: T, index: number): boolean;
             use?(this: ProxyHandler<T, I>, target: T): void;
-
-            // TODO! remove this code
-            // item(target: T, index: number | symbol): I;
-            // symbol?(target: T, index: number): symbol;
         }
     }
 }

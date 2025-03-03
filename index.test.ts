@@ -1022,6 +1022,52 @@ describe('Derived.Array.proxy', () => {
     });
 });
 
+describe('Derived.Array.range', () => {
+    it('should generate a valid range array for length 5', () => {
+        expect(Array.from(Derived.Array.range(5))).toEqual([0, 1, 2, 3, 4]);
+    });
+    it('should generate a valid range array for length 0', () => {
+        expect(Array.from(Derived.Array.range(0))).toEqual([]);
+    });
+    it('should generate a valid range array for length 5 while calling fn', () => {
+        expect(Array.from(Derived.Array.range(5, String))).toEqual(["0", "1", "2", "3", "4"]);
+    });
+    it('should generate a valid range array for derived length', () => {
+        const state = new State(0);
+        const derived = Derived.Array.range(state);
+        expect(Array.from(derived)).toEqual([]);
+        state.set(5);
+        expect(Array.from(derived)).toEqual([0, 1, 2, 3, 4]);
+        state.set(3);
+        expect(Array.from(derived)).toEqual([0, 1, 2]);
+    });
+    it('should generate a valid range array for derived length while calling fn', () => {
+        const state = new State(0);
+        const derived = Derived.Array.range(state, String);
+        expect(Array.from(derived)).toEqual([]);
+        state.set(5);
+        expect(Array.from(derived)).toEqual(["0", "1", "2", "3", "4"]);
+        state.set(3);
+        expect(Array.from(derived)).toEqual(["0", "1", "2"]);
+    });
+    it('should generate a valid range array for derived length while calling fn, and should rerun on dependency invalidation', () => {
+        const prefix = new State("");
+        const state = new State(0);
+        const derived = Derived.Array.range(state, x => prefix() + x);
+        expect(Array.from(derived)).toEqual([]);
+        state.set(5);
+        expect(Array.from(derived)).toEqual(["0", "1", "2", "3", "4"]);
+        state.set(3);
+        expect(Array.from(derived)).toEqual(["0", "1", "2"]);
+        prefix.set("0x");
+        expect(Array.from(derived)).toEqual(["0x0", "0x1", "0x2"]);
+        state.set(4);
+        expect(Array.from(derived)).toEqual(["0x0", "0x1", "0x2", "0x3"]);
+        prefix.set("&H");
+        expect(Array.from(derived)).toEqual(["&H0", "&H1", "&H2", "&H3"]);
+    });
+});
+
 describe("State.is", () => {
     test("frozen objects compare equal", () => {
         const is = State.is;
