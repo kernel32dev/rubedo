@@ -1377,7 +1377,7 @@ const DerivedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
     },
     $use() {
         if (this[sym_handler].use) {
-            this[sym_handler].use();
+            this[sym_handler].use(this[sym_target]);
         } else {
             const length = this.length;
             for (let i = 0; i < length; i++) {
@@ -1389,6 +1389,7 @@ const DerivedArrayPrototype = defineProperties({ __proto__: Array.prototype }, {
         return createDerivedArray({
             fn: thisArg ? derivator.bind(thisArg) : derivator,
             src: this,
+            imap: Array(0),
             map: new WeakMap(),
         }, mapArrayProxyHandler);
     },
@@ -1615,15 +1616,20 @@ const derivedLengthMappedRangeArrayProxyHandler = {
 //#endregion
 //#region derived map array
 
-/** @type {import(".").Derived.Array.ProxyHandler<{ src: any[], fn(item: any): any, map: WeakMap<symbol, import(".").Derived<any>> }>} */
+/** @type {import(".").Derived.Array.ProxyHandler<{ src: any[], fn(item: any): any, imap: import(".").Derived<any>[], map: WeakMap<symbol, import(".").Derived<any>> }>} */
 const mapArrayProxyHandler = {
     length(target) {
         return target.src.length;
     },
     item(target, index) {
         if (typeof index == "number") {
-            index = target.src.$slot(index);
-            if (!index) return undefined;
+            const slot = target.src.$slot(index);
+            if (!slot) {
+                return (target.imap[index] || (target.imap[index] = new Derived(function mapItem() {
+                    return index in target.src ? (0, target.fn)(target.src[index]) : sym_empty;
+                })))();
+            }
+            index = slot;
         }
         let derived = target.map.get(index);
         if (!derived) {

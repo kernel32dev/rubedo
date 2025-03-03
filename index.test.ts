@@ -726,7 +726,7 @@ describe("tracked array", () => {
         arr[0] = 3;
         expect(derived()).toEqual(["3"]);
     });
-    test("derived map works", () => {
+    test("derived map works with stateful array", () => {
         const arr = State.track<number[]>([0, 1, 2]);
         const mock = jest.fn(String);
         const derived = arr.$map(mock);
@@ -738,7 +738,7 @@ describe("tracked array", () => {
         expect([...derived]).toEqual(["3", "1", "2"]);
         expect(mock).toHaveBeenCalledTimes(4);
     });
-    test("double derived map works", () => {
+    test("double derived map works with stateful array", () => {
         const arr = State.track<number[]>([0, 1, 2]);
         const mock = jest.fn(String);
         const derived = arr.$map(mock).$map(Number);
@@ -746,6 +746,32 @@ describe("tracked array", () => {
         expect([...derived]).toEqual([0, 1, 2]);
         expect(mock).toHaveBeenCalledTimes(3);
         arr[0] = 3;
+        expect(mock).toHaveBeenCalledTimes(3);
+        expect([...derived]).toEqual([3, 1, 2]);
+        expect(mock).toHaveBeenCalledTimes(4);
+    });
+    test("derived map works with derived array", () => {
+        const alter = new State(false);
+        const arr = Derived.Array.range(3, i => i === 0 && alter() ? 3 : i);
+        const mock = jest.fn(String);
+        const derived = arr.$map(mock);
+        expect(mock).toHaveBeenCalledTimes(0);
+        expect([...derived]).toEqual(["0", "1", "2"]);
+        expect(mock).toHaveBeenCalledTimes(3);
+        alter.set(true);
+        expect(mock).toHaveBeenCalledTimes(3);
+        expect([...derived]).toEqual(["3", "1", "2"]);
+        expect(mock).toHaveBeenCalledTimes(4);
+    });
+    test("double derived map works with derived array", () => {
+        const alter = new State(false);
+        const arr = Derived.Array.range(3, i => i === 0 && alter() ? 3 : i);
+        const mock = jest.fn(String);
+        const derived = arr.$map(mock).$map(Number);
+        expect(mock).toHaveBeenCalledTimes(0);
+        expect([...derived]).toEqual([0, 1, 2]);
+        expect(mock).toHaveBeenCalledTimes(3);
+        alter.set(true);
         expect(mock).toHaveBeenCalledTimes(3);
         expect([...derived]).toEqual([3, 1, 2]);
         expect(mock).toHaveBeenCalledTimes(4);
