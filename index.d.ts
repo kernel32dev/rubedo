@@ -374,9 +374,9 @@ export const State: {
      *
      * **Reference**:
      *
-     * has the semantics of `Object.is`, but frozen objects (`Object.isFrozen`) with the same string data properties and the same prototype are compared equal
+     * has the semantics of `Object.is`, but frozen objects (`Object.isFrozen`) with the same string keyed properties and the same prototype are compared equal
      *
-     * other properties are ignored
+     * symbol keyed properties, property order and property enumerability are ignored
      *
      * works recursively, but may return false for self referential nested objects
      *

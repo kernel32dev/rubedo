@@ -1226,6 +1226,7 @@ function is(a, b) {
     if (typeof a != "object" || typeof b != "object" || !a || !b) return false;
     // this may break if a proxy trap for getPrototype, isExtensible or ownKeys calls State.is from State.isr
     // none of the aforementioned traps can call State.is or user code for now, so this is safe
+    // TODO! the reasoning above is no longer valid with derived arrays, fix this
     remainingFrozenComparisonsDepth = maximumFrozenComparisonsDepth;
     try {
         return isr(a, b);
@@ -1235,7 +1236,6 @@ function is(a, b) {
 }
 
 function isr(a, b) {
-    // TODO! check if it has the same getters and setters
     if (Object.is(a, b)) return true;
     if (typeof a != "object" || typeof b != "object" || !a || !b) return false;
     let descriptors_a, descriptors_b;
@@ -1260,11 +1260,12 @@ function isr(a, b) {
         try {
             for (const key_a in descriptors_a) {
                 const prop_a = descriptors_a[key_a];
-                if ("value" in prop_a) {
-                    const prop_b = descriptors_b[key_a];
-                    if (!prop_b || !("value" in prop_b) || !isr(prop_a.value, prop_b.value)) {
-                        return false;
-                    }
+                const prop_b = descriptors_b[key_a];
+                if (!prop_b || ("value" in prop_a
+                    ? !("value" in prop_b) || !isr(prop_a.value, prop_b.value)
+                    : prop_a.get !== prop_b.get || prop_a.set !== prop_b.set
+                )) {
+                    return false;
                 }
             }
             return true;
@@ -1278,12 +1279,13 @@ function isr(a, b) {
         remainingFrozenComparisonsDepth--;
         for (const key_a in descriptors_a) {
             const prop_a = descriptors_a[key_a];
-            if ("value" in prop_a) {
-                const prop_b = descriptors_b[key_a];
-                if (!prop_b || !("value" in prop_b) || !isr(prop_a.value, prop_b.value)) {
-                    remainingFrozenComparisonsDepth++;
-                    return false;
-                }
+            const prop_b = descriptors_b[key_a];
+            if (!prop_b || ("value" in prop_a
+                ? !("value" in prop_b) || !isr(prop_a.value, prop_b.value)
+                : prop_a.get !== prop_b.get || prop_a.set !== prop_b.set
+            )) {
+                remainingFrozenComparisonsDepth++;
+                return false;
             }
         }
         remainingFrozenComparisonsDepth++;

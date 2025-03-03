@@ -397,7 +397,7 @@ describe("Derived static functions", () => {
     });
     test("Derived.prop", () => {
         Derived.now(() => {
-            const tracked = State.track({key: 1});
+            const tracked = State.track({ key: 1 });
             const derived = Derived.prop(tracked, "key");
             expect(derived()).toBe(1);
             tracked.key = 2;
@@ -406,7 +406,7 @@ describe("Derived static functions", () => {
     });
     test("Derived.cheap", () => {
         Derived.now(() => {
-            const tracked = State.track({key: 1});
+            const tracked = State.track({ key: 1 });
             const derivator = jest.fn(() => tracked.key);
             const derived = Derived.cheap(derivator);
             expect(derived()).toBe(1);
@@ -421,25 +421,25 @@ describe("Derived static functions", () => {
 describe("Derived forwarding methods", () => {
     test("valueOf", () => {
         const ref = {};
-        expect(Derived.from({valueOf() { return ref; }}).valueOf()).toBe(ref);
+        expect(Derived.from({ valueOf() { return ref; } }).valueOf()).toBe(ref);
         expect(Derived.from(null).valueOf()).toBe(null);
         expect(Derived.from(undefined).valueOf()).toBe(undefined);
     });
     test("toString", () => {
         expect(Derived.from(2).toString()).toBe((2).toString());
-        expect(Derived.from({toString() { return 2; }}).toString()).toBe("" + 2);
+        expect(Derived.from({ toString() { return 2; } }).toString()).toBe("" + 2);
         expect(Derived.from(null).toString()).toBe("null");
         expect(Derived.from(undefined).toString()).toBe("undefined");
     });
     test("toLocaleString", () => {
         expect(Derived.from(2).toLocaleString()).toBe((2).toLocaleString());
-        expect(Derived.from({toLocaleString() { return 2; }}).toLocaleString()).toBe("" + 2);
+        expect(Derived.from({ toLocaleString() { return 2; } }).toLocaleString()).toBe("" + 2);
         expect(Derived.from(null).toLocaleString()).toBe("null");
         expect(Derived.from(undefined).toLocaleString()).toBe("undefined");
     });
     test("toJSON", () => {
         const ref = State.track({});
-        expect(Derived.from({toJSON() { return ref; }}).toJSON()).toBe(ref);
+        expect(Derived.from({ toJSON() { return ref; } }).toJSON()).toBe(ref);
         expect(Derived.from(ref).toJSON()).toBe(ref);
         expect(Derived.from(null).toJSON()).toBe(null);
         expect(Derived.from(undefined).toJSON()).toBe(undefined);
@@ -459,7 +459,7 @@ describe("Derived forwarding methods", () => {
     test("Symbol.iterator throws", () => {
         expect(() => {
             const derived = Derived.from<number[]>(null!);
-            for (const i of derived) {}
+            for (const i of derived) { }
         }).toThrow();
     });
     // Polyfill breaks this test
@@ -1015,7 +1015,7 @@ describe('Derived.Array.proxy', () => {
             use: useMock,
         });
         expect(useMock).not.toHaveBeenCalled();
-        for (const i in derivedArray) {}
+        for (const i in derivedArray) { }
         expect(useMock).toHaveBeenCalledTimes(1);
         Object.getOwnPropertyNames(derivedArray);
         expect(useMock).toHaveBeenCalledTimes(2);
@@ -1098,6 +1098,67 @@ describe("State.is", () => {
         State.freeze(b);
 
         expect(State.is(a, b)).toBe(false);
+    });
+});
+describe("State.is - getters and setters", () => {
+
+    function createGetterSetterObject<T extends Record<string, { get?(): any, set?(value: any): void }>>(object: T): {
+        [P in keyof T]: (T[P] extends { get(): infer U } ? U : never) | (T[P] extends { set(arg: infer U): void } ? U : never)
+    } {
+        return State.freeze(Object.create(null, object)) as any;
+    }
+
+    test("frozen objects with identical getters compare equal", () => {
+        const is = State.is;
+        function get() {
+            return 42;
+        }
+        const a = createGetterSetterObject({
+            value: { get },
+        });
+        const b = createGetterSetterObject({
+            value: { get },
+        });
+        expect(is(a, b)).toBe(true);
+    });
+
+    test("frozen objects with different getter return values compare unequal", () => {
+        const is = State.is;
+        const a = State.freeze({
+            get value() { return 42; }
+        });
+
+        const b = State.freeze({
+            get value() { return 43; }
+        });
+
+        expect(is(a, b)).toBe(false);
+    });
+
+    test("frozen objects with identical setters compare equal", () => {
+        const is = State.is;
+        function set(v: number) { }
+        const a = createGetterSetterObject({
+            value: { set },
+        });
+        const b = createGetterSetterObject({
+            value: { set },
+        });
+        expect(is(a, b)).toBe(true);
+    });
+
+    test("frozen objects with different setters compare unequal", () => {
+        const is = State.is;
+        const a = State.freeze({
+            set value(v) { }
+        });
+
+        const b = State.freeze({
+            _val: 0,
+            set value(v) { }
+        });
+
+        expect(is(a, b)).toBe(false);
     });
 });
 
