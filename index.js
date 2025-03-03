@@ -451,7 +451,7 @@ function Derived(name, derivator) {
     return derived;
 }
 
-Object.assign(Derived, {
+defineProperties(Derived, {
     now(derivator) {
         const old_derived = current_derived;
         const old_derived_used = current_derived_used;
@@ -637,7 +637,7 @@ function State(name, value) {
     return State;
 }
 
-Object.assign(State, {
+defineProperties(State, {
     track,
     prop(name, target, key) {
         if (arguments.length == 2) {
@@ -776,7 +776,7 @@ function Effect() {
     return affector;
 }
 
-Object.assign(Effect, {
+defineProperties(Effect, {
     Persistent: function Persistent(name, affector) {
         if (!new.target) throw new TypeError("Constructor Effect.Persistent requires 'new'");
         if (arguments.length == 1) {
@@ -1432,7 +1432,7 @@ const derivedLengthMappedRangeArrayProxyHandler = {
     },
 };
 
-Object.assign(DerivedArray, {
+defineProperties(DerivedArray, {
     proxy(target, handler) {
         return createDerivedArray(target, handler);
     },
@@ -1573,15 +1573,10 @@ function StateObject() {
     return proxy;
 }
 
-Object.defineProperty(StateObject, Symbol.hasInstance, {
-    value: function isStateObject(target) {
+defineProperties(StateObject, {
+    [Symbol.hasInstance]: function isStateObject(target) {
         return target && typeof target == "object" && sym_tracked in target;
     },
-    writable: true,
-    enumerable: true,
-    configurable: true,
-});
-Object.assign(StateObject, {
     use(target) {
         if (!target || typeof target !== "object") throw new TypeError("target is not an Object");
         if (!prepareUseTracked()) return;
@@ -1774,15 +1769,10 @@ function StateArray() {
     return proxy;
 }
 
-Object.defineProperty(StateArray, Symbol.hasInstance, {
-    value: function isStateArray(target) {
+defineProperties(StateArray, {
+    [Symbol.hasInstance]: function isStateArray(target) {
         return Array.isArray(target) && sym_tracked in target;
     },
-    writable: true,
-    enumerable: true,
-    configurable: true,
-});
-Object.assign(StateArray, {
     use(target) {
         if (!target || typeof target !== "object" || !Array.isArray(target)) throw new TypeError("target is not an Array");
         if (!prepareUseTracked() || !(sym_len in target)) return;
@@ -2332,7 +2322,7 @@ function StateMap(iterable) {
 
 StateMap.prototype = StateMapPrototype;
 
-Object.assign(StateMap, {
+defineProperties(StateMap, {
     use(target) {
         if (!(target instanceof Map)) throw new TypeError("target is not a Map");
         if (prepareUseTracked()) {
@@ -2448,7 +2438,7 @@ function StateSet(iterable) {
 
 StateSet.prototype = StateSetPrototype;
 
-Object.assign(StateSet, {
+defineProperties(StateSet, {
     use(target) {
         if (!(target instanceof Set)) throw new TypeError("target is not a Set");
         if (prepareUseTracked()) {
@@ -2469,15 +2459,10 @@ function StatePromise(executor) {
 }
 
 StatePromise.prototype = Promise.prototype;
-Object.defineProperty(StatePromise, Symbol.hasInstance, {
-    value: function isStatePromise(target) {
+defineProperties(StatePromise, {
+    [Symbol.hasInstance]: function isStatePromise(target) {
         return target instanceof Promise && sym_tracked in target;
     },
-    writable: true,
-    enumerable: true,
-    configurable: true,
-});
-Object.assign(StatePromise, {
     use(target) {
         if (!(target instanceof Promise)) throw new TypeError("target is not a Promise");
         track(target);
