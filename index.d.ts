@@ -238,7 +238,7 @@ export namespace Derived {
      *
      * is is safe to pass a `Derived` to Or, in which case it won't do anything
      */
-    type Or<T> = T extends Derived<infer U> ? T : T | Derived<T>;
+    type Or<T> = T | Derived<Derived.Use<T>>;
 
     /** **Summary**: a recursive type alias to help you turn `T`, `Derived<T>` or `Derived<Derived<T>>` into `T` */
     type Use<T> = T extends Derived<infer U> ? Use<U> : T;
