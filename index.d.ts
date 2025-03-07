@@ -156,7 +156,15 @@ export const Derived: {
      *
      * as the name suggests this is for times when the derivator is cheap to run, and memoization would just be wasting time and memory
      *
-     * **Reference**: creates an instance of derived that when called, calls derivator and passes it throug `Derived.use` before returning the value
+     * if also makes sense to use cheap when the memoization would never do anything, such as when the derivation always creates a new (non frozen) object, in these cases disabling memoization also makes sense
+     *
+     * note that this does not mean that dependencies won't be added, this just means that they won't be added to this derivation in particular, but to the surrounding derivation instead
+     *
+     * **Reference**: creates an instance of derived that when called, calls derivator and passes it through `Derived.use` before returning the value
+     *
+     * note also that this is not exactly equivalent to a regular derivation, since dependencies are not tracked, derivator won't rerun if it invalidated it owns dependencies
+     *
+     * most of the time this won't be an issue since usually the derivator will be running inside a regular derivation or inside an effect that will rerun when that happens
      */
     cheap<T>(derivator: () => T): Derived<Derived.Use<T>>;
     cheap<T>(name: string, derivator: () => T): Derived<Derived.Use<T>>;
@@ -303,7 +311,7 @@ export namespace Derived {
 export interface State<in out T> extends Derived<T> {
     /** **Summary**: changes the value in this state
      *
-     * **Reference**: if the new value is different from the current one according to {@link State.is} equality, and invalidates dependents (not transitive invalidation)
+     * **Reference**: if the new value is different from the current one according to {@link State.is} equality, then it does nothing, otherwise it sets the value and invalidates dependents (not transitive invalidation)
      *
      * note that this function is used to change the value, if what you want is to change something inside an object contained in this `State`, you don't use this method, instead you can just mutate it directly
      *
