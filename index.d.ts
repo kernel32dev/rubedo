@@ -766,34 +766,49 @@ export const Effect: {
  *
  * the function succeeds if all handlers succeed, if one or more of them fail, the errors are collected into an aggregate error and thrown
  */
-export interface Signal<in out T extends any[]> {
-    (...args: T): void;
-    /** **Summary**: does the same as calling the signal, but returns errors instead of throwing them, always returns null on success and `AggregateError` otherwise */
-    try(...args: T): AggregateError | null;
-    /** **Summary**: adds a handler that will stop when garbage collected
-     *
-     * but that will not be garbage collected while the objects passed are alive (the affected)
-     */
-    on(...args: [WeakKey, ...WeakKey[], (...args: T) => void]): this;
-    /** **Summary**: stops a handler from being called */
-    off(handler: (...args: T) => void): this;
-    /** **Summary**: adds a handler that will only stop being called when it is removed with the off method
-     *
-     * it is your responsiblity to ensure that either:
-     * 1. you call the off method at some point
-     * 2. the handler is meant to live for as long as the signal itself
-     */
-    persistent(handler: (...args: T) => void): this;
-    /** **Summary**: adds a handler that will stop when garbage collected or when removed with the off method
-     *
-     * it is your responsiblity to ensure that someone has strong references to the handler, or else the handler may unexpectedly stop working because of garbage collection
-     */
-    weak(handler: (...args: T) => void): this;
-}
+export interface Signal<in out T extends any[]> extends Signal.Sender<T>, Signal.Receiver<T> {}
 export const Signal: {
     new <T extends any[] = []>(): Signal<T>;
     prototype: Signal<any[]>;
+
+    /** **Summary**: the `/dev/null` of signals, you can add handlers to this and then call it, but nothing will happen
+     *
+     * suitable as a default value for signals
+     *
+     * only this instance of this kind of object exists, to test if a signal is null just compare it with this object
+     */
+    null: Signal<any>;
 };
+export namespace Signal {
+    /** **Summary**: the sender half of a signal, which means just the signature of a function, is contravariant to T */
+    interface Sender<in T extends any[]> {
+        (...args: T): void;
+    }
+    /** **Summary**: the receiver half of a signal, contains all the methods for adding handlers and removing handlers to a signal, and is covariant to T */
+    interface Receiver<out T extends any[]> {
+        /** **Summary**: does the same as calling the signal, but returns errors instead of throwing them, always returns null on success and `AggregateError` otherwise */
+        try(...args: T): AggregateError | null;
+        /** **Summary**: adds a handler that will stop when garbage collected
+         *
+         * but that will not be garbage collected while the objects passed are alive (the affected)
+         */
+        on(...args: [WeakKey, ...WeakKey[], (...args: T) => void]): this;
+        /** **Summary**: stops a handler from being called */
+        off(handler: (...args: T) => void): this;
+        /** **Summary**: adds a handler that will only stop being called when it is removed with the off method
+         *
+         * it is your responsiblity to ensure that either:
+         * 1. you call the off method at some point
+         * 2. the handler is meant to live for as long as the signal itself
+         */
+        persistent(handler: (...args: T) => void): this;
+        /** **Summary**: adds a handler that will stop when garbage collected or when removed with the off method
+         *
+         * it is your responsiblity to ensure that someone has strong references to the handler, or else the handler may unexpectedly stop working because of garbage collection
+         */
+        weak(handler: (...args: T) => void): this;
+    }
+}
 
 declare global {
     interface Array<T> {

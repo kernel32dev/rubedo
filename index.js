@@ -2880,6 +2880,34 @@ function Signal() {
     }
 }
 
+defineProperties(Signal, {
+    null: Object.setPrototypeOf(function nopSignal() {}, defineProperties({ __proto__: SignalPrototype }, {
+        try() { return null; },
+        on() {
+            const args = arguments;
+            if (typeof args[args.length - 1] != "function") throw new TypeError("handler is not a function");
+            for (let i = 0; i < args.length - 1; i++) {
+                if (typeof args[i] != "object" && typeof args[i] != "symbol") {
+                    throw new TypeError("Invalid value used as weak map key");
+                }
+            }
+            return this;
+        },
+        off(handler) {
+            if (typeof handler != "function") throw new TypeError("handler is not a function");
+            return this;
+        },
+        persistent(handler) {
+            if (typeof handler != "function") throw new TypeError("handler is not a function");
+            return this;
+        },
+        weak(handler) {
+            if (typeof handler != "function") throw new TypeError("handler is not a function");
+            return this;
+        },
+    })),
+});
+
 Signal.prototype = SignalPrototype;
 
 /** @param {Signal} signal @param {{[key: number]: any; length: number}} args */
