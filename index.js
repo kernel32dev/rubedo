@@ -1655,7 +1655,7 @@ const mapArrayProxyHandler = {
         const slots = target.src.$slots();
         const length = slots.length;
         for (let i = 0; i < length; i++) {
-            const derived = target.map.get(index);
+            const derived = target.map.get(i);
             if (derived) derived();
         }
     },
