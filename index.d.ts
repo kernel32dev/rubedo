@@ -219,6 +219,39 @@ export namespace Derived {
             /** **Summary**: A symbol that represents the absence of an array item, expected to be returned on the `Derived.Array.ProxyHandler.item` when getting items past the array's end or at holes (sparse arrays) */
             readonly empty: unique symbol;
         };
+        /** **TODO!** */
+        Date: {
+            new (...args: never): never;
+            readonly prototype: Date;
+
+            /** **Summary**: creates a read-only derived date, whose value is derived from a handler function every time it is read */
+            proxy(handler: () => number): Date;
+
+            /** **Summary**: returns an observable Date object that changes with the current time
+            *
+            * you can specify the precision of the date, time information less than the precision requested will be truncated to zero
+            *
+            * timezone specifies from what timezone to get the time, this is relevant for lower precisions such as hour and day, where the timezones affect where the day and hour boundaries are
+            *
+            * the only timezones supported are local and utc
+            *
+            * the frame argument specifies if the clock should update even if the browser does not want to render
+            *
+            * if it is set to `"respect frame"`, the clock will first call `requestAnimationFrame` to see if it makes sense to invalidate itself
+            *
+            * the default precision is second, the default timezone is local, and by default frames are respected if `requestAnimationFrame` is available
+            */
+            clock(
+                precision?: "ms" | "second" | "minute" | "hour" | "day" = "sec",
+                timezone?: "local" | "utc" = "local",
+                frame?: "respect frame" | "ignore frame",
+            ): Date;
+
+            /** returns true if the date is in the past, if it is in the future and this method is executed inside a derivation, the derivation will be invalidated when this date passes */
+            isPast(value: number | string | Date): boolean;
+            /** returns true if the date is in the future, if it is in the future and this method is executed inside a derivation, the derivation will be invalidated when this date passes */
+            isFuture(value: number | string | Date): boolean;
+        };
     
         /** set this property to a function to log when any `WeakRef` created by rubedo is garbage collected */
         debugLogWeakRefCleanUp: ((message: string) => void) | null;
@@ -361,6 +394,7 @@ export namespace State {
          * 6. **Map** (with default prototype, only keys, values and size)
          * 7. **Set** (with default prototype, only items and size)
          * 8. **Promise** (with default prototype, only the value or rejection of the promise)
+         * 9. **Date** (with default prototype, only the time stored)
          *
          * also note that some tracking requires wrapping the object in a proxy,
          * and thus the original value may not tracked,
@@ -464,7 +498,7 @@ export namespace State {
          *
          * you can use `instanceof State.Object` to test if an object is tracked, it also returns true for all tracked objects (`State.Object`, `State.Array`, `State.Map`, `State.Set` and `State.Promise`)
          *
-         * **Reference**: creates a new object with the correct prototype and already wrapped in a proxy
+         * **Reference**: creates a new object with the correct prototype and properties and already wrapped in a proxy
          */
         Object: {
             new(): Object;
@@ -497,7 +531,7 @@ export namespace State {
          *
          * you can use `instanceof State.Array` to test if an array is tracked, `instanceof State.Object` also returns true for tracked arrays
          *
-         * **Reference**: creates a new array with the correct prototype and already wrapped in a proxy
+         * **Reference**: creates a new array with the correct prototype and properties and already wrapped in a proxy
          */
         Array: {
             new(arrayLength?: number): any[];
@@ -529,7 +563,7 @@ export namespace State {
          *
          * you can use `instanceof State.Map` to test if a map is tracked, `instanceof State.Object` also returns true for tracked maps
          *
-         * **Reference**: creates a new map with the correct prototype
+         * **Reference**: creates a new map with the correct prototype and properties
          */
         Map: {
             new <K, V>(iterable?: Iterable<readonly [K, V]> | null | undefined): Map<K, V>;
@@ -548,7 +582,7 @@ export namespace State {
          *
          * you can use `instanceof State.Set` to test if an object is tracked, `instanceof State.Object` also returns true for tracked sets
          *
-         * **Reference**: creates a new set with the correct prototype
+         * **Reference**: creates a new set with the correct prototype and properties
          */
         Set: {
             new <T>(iterable?: Iterable<T> | null | undefined): Set<T>;
@@ -567,7 +601,7 @@ export namespace State {
          *
          * you can use `instanceof State.Promise` to test if an object is tracked, `instanceof State.Object` also returns true for tracked promises
          *
-         * **Reference**: creates a new promise with the correct prototype
+         * **Reference**: creates a new promise with the correct prototype and properties
          */
         Promise: {
             new <T>(executor: (resolve: (value: T | PromiseLike<T>) => void, reject: (reason?: any) => void) => void): Promise<T>;
@@ -609,6 +643,20 @@ export namespace State {
                 resolve: (value: T | PromiseLike<T>) => void;
                 reject: (reason?: any) => void;
             };
+        };
+        /** **Summary**: a date that is tracked, changes to it can be noticed by derivations that use it
+         *
+         * you can inherit from this to allow your custom date classes to have their values tracked (custom classes are not tracked by default, see {@link State.track})
+         *
+         * you can use `instanceof State.Map` to test if a date is tracked, `instanceof State.Object` also returns true for tracked dates
+         *
+         * **Reference**: creates a new date with the correct prototype and properties
+         */
+        Date: {
+            new (value: number | string | Date): Date;
+            new (year: number, monthIndex: number, date?: number, hours?: number, minutes?: number, seconds?: number, ms?: number): Date;
+            new (): Date;
+            readonly prototype: Date;
         };
     }
     type Object = globalThis.Object;
@@ -821,27 +869,27 @@ declare global {
     interface Array<T> {
         /** gets the symbol that represents this slot, returns undefined if the index is out of range or if slots are not tracked with symbols
          *
-         * the `$` indicates this is a method added by rubedo-state
+         * the `$` indicates this is a method added by rubedo
          */
         $slot(index: number): symbol | undefined;
         /** returns all the symbol that represents the slots as of currently, use this instead of calling symbol in a loop when all symbols are needed
          *
-         * the `$` indicates this is a method added by rubedo-state
+         * the `$` indicates this is a method added by rubedo
          */
         $slots(): (symbol | undefined)[];
         /** gets an item by symbol returns `Derived.Array.empty` if no slot is being tracked with that symbol
          *
-         * the `$` indicates this is a method added by rubedo-state
+         * the `$` indicates this is a method added by rubedo
          */
         $slotValue(index: symbol): T | typeof Derived.Array.empty;
         /** returns true if a slot is being tracked with that symbol
          *
-         * the `$` indicates this is a method added by rubedo-state
+         * the `$` indicates this is a method added by rubedo
          */
         $slotExists(index: symbol): boolean;
         /** uses this entire array, adding it in its entirety as a dependency of the current derivator
          *
-         * the `$` indicates this is a method added by rubedo-state
+         * the `$` indicates this is a method added by rubedo
          */
         $use(): void;
 
@@ -857,7 +905,7 @@ declare global {
          *
          * this call creates no dependencies on the current derivator
          *
-         * the `$` indicates this is a method added by rubedo-state
+         * the `$` indicates this is a method added by rubedo
          */
         $map<U>(derivator: (value: T) => U): U[];
         $map<U, This>(derivator: (this: This, value: T) => U, thisArg: This): U[];
@@ -875,7 +923,7 @@ declare global {
          *
          * however, because it notifies on change it is completely safe and correct to call this from derivations
          *
-         * the `$` indicates this is a method added by rubedo-state
+         * the `$` indicates this is a method added by rubedo
          */
         $resolved(): this is { $value: T };
         /** returns true if this promise is already rejected (has `$error`)
@@ -890,7 +938,7 @@ declare global {
          *
          * however, because it notifies on change it is completely safe and correct to call this from derivations
          *
-         * the `$` indicates this is a method added by rubedo-state
+         * the `$` indicates this is a method added by rubedo
          */
         $rejected(): this is { $value: undefined };
         /** returns true if this promise is already resolved or rejected
@@ -905,7 +953,7 @@ declare global {
          *
          * however, because it notifies on change it is completely safe and correct to call this from derivations
          *
-         * the `$` indicates this is a method added by rubedo-state
+         * the `$` indicates this is a method added by rubedo
          */
         $settled(): boolean;
         /** if the promise is resolved, returns its value
@@ -916,7 +964,7 @@ declare global {
          *
          * essentially its like an `await` except it returns synchronously if the promise is not settled
          *
-         * the `$` indicates this is a method added by rubedo-state
+         * the `$` indicates this is a method added by rubedo
          */
         $now(): this["$value"];
         /** returns the value, or undefined it this promise is not settled or was rejected
@@ -929,7 +977,7 @@ declare global {
          *
          * however, because it notifies on change it is completely safe and correct to use this from derivations
          *
-         * the `$` indicates this is a property added by rubedo-state
+         * the `$` indicates this is a property added by rubedo
          */
         readonly $value: T | undefined;
         /** returns the error, or undefined it this promise is not settled or was resolved
@@ -944,8 +992,20 @@ declare global {
          *
          * however, because it notifies on change it is completely safe and correct to use this from derivations
          *
-         * the `$` indicates this is a property added by rubedo-state
+         * the `$` indicates this is a property added by rubedo
          */
         readonly $error: unknown;
+    }
+    interface Date {
+        /** returns true if this date is in the past, if it is in the future and this method is executed inside a derivation, the derivation will be invalidated when this date passes
+         *
+         * the `$` indicates this is a property added by rubedo
+         */
+        $isPast(): boolean;
+        /** returns true if this date is in the future, if it is in the future and this method is executed inside a derivation, the derivation will be invalidated when this date passes
+         *
+         * the `$` indicates this is a property added by rubedo
+         */
+        $isFuture(): boolean;
     }
 }

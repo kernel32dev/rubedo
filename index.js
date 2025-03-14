@@ -11,7 +11,7 @@
 
 /** the derivations of this object (Derived objects that depend on this), present on all objects that can be depended on such as State and Derived
  *
- * on `State` and `Derived` this is always a `Set<WeakRef<Derived>>`
+ * on `State`, `Derived` and `DerivedDate` this is always a `Set<WeakRef<Derived>>`
  *
  * on `StateObject` this is always a `Record<string | sym_all, Set<WeakRef<Derived>>>` with null prototype
  *
@@ -122,7 +122,7 @@ const sym_all = Symbol("all");
 /** used by StateView and DerivedArray */
 const sym_target = Symbol("target");
 
-/** used by StateView and DerivedArray */
+/** used by StateView and DerivedArray and DerivedDate */
 const sym_handler = Symbol("handler");
 
 /** used by StateView */
@@ -513,9 +513,10 @@ defineProperties(Derived, {
         }[name], DerivedPrototype);
     },
     Array: DerivedArray,
+    Date: DerivedDate,
     onUseDerivedOutsideOfDerivation: "allow",
     onUseTrackedOutsideOfDerivation: "allow",
-})
+});
 
 Object.defineProperty(Derived, "debugLogWeakRefCleanUp", {
     get() {
@@ -692,6 +693,7 @@ defineProperties(State, {
     Map: StateMap,
     Set: StateSet,
     Promise: StatePromise,
+    Date: StateDate,
 })
 
 State.prototype = StatePrototype;
@@ -1109,6 +1111,11 @@ function track(value) {
         Object.defineProperty(value, sym_ders, { value: new Map() });
         Object.defineProperty(value, sym_all, { value: new Set() });
         Object.defineProperty(value, sym_tracked, { value });
+    } else if (proto == Date.prototype) {
+        if (!Object.isExtensible(value)) trackNonExtensibleError();
+        Object.setPrototypeOf(value, StateDatePrototype);
+        Object.defineProperty(value, sym_ders, { value: new Set() });
+        Object.defineProperty(value, sym_tracked, { value });
     }
     return value;
 }
@@ -1445,7 +1452,6 @@ const DerivedArrayProxyHandler = {
         return value === sym_empty ? undefined : value;
     },
     getOwnPropertyDescriptor(target, p) {
-        console.log(Reflect.getOwnPropertyDescriptor(target, p));
         if (p === "length") return {
             value: validate_length(target[sym_handler].length(target[sym_target])),
             writable: true,
@@ -1660,6 +1666,371 @@ const mapArrayProxyHandler = {
         }
     },
 };
+
+//#endregion
+//#region derived date
+
+function mutationOnDerivedDate() {
+    throw new TypeError("cannot mutate derived date");
+}
+
+function DerivedDate() {
+    // see comment in the implementation of DerivedArray for the reasoning behind this code
+    if (!new.target) throw new TypeError("Constructor DerivedDate requires 'new'");
+    return Reflect.construct(StateDate, arguments, StateDate); // override new.target to always use StateDate, we don't want the DerivedDate prototype
+}
+
+const DerivedDatePrototype = { __proto__: Date.prototype };
+
+DerivedDate.prototype = DerivedDatePrototype;
+
+defineProperties(DerivedDate, {
+    proxy(handler) {
+        if (typeof handler != "function") throw new TypeError("handler is not a function");
+        const value = Reflect.construct(Date, [0], DerivedDate);
+        Object.defineProperty(value, sym_handler, { value: handler });
+        Object.defineProperty(value, sym_tracked, { value });
+        return value;
+    },
+    clock(precision, timezone, frame) {
+        if (!arguments.length) {
+            try {
+                void requestAnimationFrame;
+                return clocks.lrse;
+            } catch {
+                return clocks.lise;
+            }
+        }
+        switch (precision) {
+            default:
+                if (typeof precision != "string") throw new TypeError("precision is not a string");
+                throw new TypeError('expected precision parameter to be one either "ms", "second", "minute", "hour" or "day", got "' + precision + '"');
+            case undefined:
+                precision = "se";
+            case "ms":
+            case "second":
+            case "minute":
+            case "hour":
+            case "day":
+        }
+        switch (timezone) {
+            default:
+                if (typeof timezone != "string") throw new TypeError("timezone is not a string");
+                throw new TypeError('expected timezone parameter to be one either "local" or "utc", got "' + timezone + '"');
+            case undefined:
+                timezone = "l";
+            case "local":
+            case "utc":
+        }
+        switch (frame) {
+            default:
+                if (typeof frame != "string") throw new TypeError("frame is not a string");
+                throw new TypeError('expected frame parameter to be one either "respect frame" or "ignore frame", got "' + frame + '"');
+            case undefined:
+            case "respect frame":
+                try {
+                    void requestAnimationFrame;
+                    frame = "r";
+                } catch {
+                    if (frame) throw new Error("Cannot create a clock that respects the frame because requestAnimationFrame is not available");
+                    frame = "i";
+                }
+                break;
+            case "ignore frame":
+        }
+        return clocks[timezone[0] + frame[0] + precision.slice(0, 2)];
+    },
+    isPast(date) {
+        if (typeof date != "number") {
+            if (typeof date == "string") date = new Date(date);
+            if (!(date instanceof Date)) {
+                throw new TypeError("expected a number, string or Date");
+            }
+            date = date.getTime();
+        }
+        return Date.now() >= date || !!invalidateThen(date);
+    },
+    isFuture(date) {
+        if (!(date instanceof Date)) date = new Date(date);
+        return Date.now() < date && !invalidateThen(date);
+    },
+});
+
+/** @type {Record<string, Date>} */
+const clocks = function () {
+    // TODO! use requestAnimationFrame
+    const millisecond_ders = new Set();
+    const second_ders = new Set();
+    const minute_ders = new Set();
+    const local_hour_ders = new Set();
+    const utc_hour_ders = new Set();
+    const local_day_ders = new Set();
+    const utc_day_ders = new Set();
+
+    const second_ms = 1000;
+    const minute_ms = second_ms * 60;
+    const hour_ms = minute_ms * 60;
+    const day_ms = hour_ms * 24;
+
+    let second_past = 0;
+    let minute_past = 0;
+    let local_hour_past = 0;
+    let utc_hour_past = 0;
+    let local_day_past = 0;
+    let utc_day_past = 0;
+
+    let timeout = 0;
+    let timeout_until = 0;
+
+    const queue_schedule_timeout_microtask = future => {
+        if (!timeout_until || timeout_until > future) {
+            if (timeout) {
+                clearTimeout(timeout);
+                timeout = 0;
+                timeout_until = 0;
+            }
+            queueMicrotask(schedule_timeout_microtask);
+            timeout_until = future;
+        }
+    };
+
+    const schedule_timeout_microtask = () => {
+        const delay = timeout_until - Date.now();
+        // console.log("delay: " + delay);
+        timeout = setTimeout(timeout_handler, delay < 0 ? 0 : delay);
+    };
+
+    const timeout_handler = () => {
+        // console.log("time: " + new Date().toLocaleTimeString() + "." + new Date().getMilliseconds().toString().padStart(3, "0"));
+        timeout = 0;
+        timeout_until = 0;
+        let my_timeout_until = 0;
+        let now;
+        if (local_day_ders.size || local_hour_ders.size) {
+            const date = new Date();
+            now = date.getTime();
+            const new_local_hour_past = date.setHours(date.getHours(), 0, 0, 0);
+            const new_local_day_past = date.setHours(0, 0, 0, 0);
+            if (local_hour_ders.size) {
+                if (local_hour_past != new_local_hour_past) {
+                    local_hour_past = 0;
+                    invalidateDerivationSet(local_hour_ders);
+                } else if (!my_timeout_until || my_timeout_until > new_local_hour_past + hour_ms) {
+                    my_timeout_until = new_local_hour_past + hour_ms;
+                }
+            }
+            if (local_day_ders.size) {
+                if (local_day_past != new_local_day_past) {
+                    local_day_past = 0;
+                    invalidateDerivationSet(local_day_ders);
+                } else if (!my_timeout_until || my_timeout_until > new_local_day_past + day_ms) {
+                    my_timeout_until = new_local_day_past + day_ms;
+                }
+            }
+        } else {
+            now = Date.now();
+        }
+        const new_utc_day_past = now - now % day_ms;
+        const new_utc_hour_past = now - now % hour_ms;
+        const new_minute_past = now - now % minute_ms;
+        const new_second_past = now - now % second_ms;
+        if (utc_day_ders.size) {
+            if (utc_day_past != new_utc_day_past) {
+                utc_day_past = 0;
+                invalidateDerivationSet(utc_day_ders);
+            } else if (!my_timeout_until || my_timeout_until > new_utc_day_past + day_ms) {
+                my_timeout_until = new_utc_day_past + day_ms;
+            }
+        }
+        if (utc_hour_ders.size) {
+            if (utc_hour_past != new_utc_hour_past) {
+                utc_hour_past = 0;
+                invalidateDerivationSet(utc_hour_ders);
+            } else if (!my_timeout_until || my_timeout_until > new_utc_hour_past + hour_ms) {
+                my_timeout_until = new_utc_hour_past + hour_ms;
+            }
+        }
+        if (minute_ders.size) {
+            if (minute_past != new_minute_past) {
+                minute_past = 0;
+                invalidateDerivationSet(minute_ders);
+            } else if (!my_timeout_until || my_timeout_until > new_minute_past + minute_ms) {
+                my_timeout_until = new_minute_past + minute_ms;
+            }
+        }
+        if (second_ders.size) {
+            if (second_past != new_second_past) {
+                second_past = 0;
+                invalidateDerivationSet(second_ders);
+            } else if (!my_timeout_until || my_timeout_until > new_second_past + second_ms) {
+                my_timeout_until = new_second_past + second_ms;
+            }
+        }
+        invalidateDerivationSet(millisecond_ders);
+        if (my_timeout_until) queue_schedule_timeout_microtask(my_timeout_until);
+    };
+
+    const millisecond_handler = () => {
+        const now = Date.now();
+        if (prepareUseTracked()) {
+            millisecond_ders.add(current_derived);
+            timeout_until = 0;
+            queue_schedule_timeout_microtask(now);
+        }
+        return now;
+    };
+    const second_handler = () => {
+        const now = Date.now();
+        const past = now - now % second_ms;
+        const future = past + second_ms;
+        if (prepareUseTracked()) {
+            second_ders.add(current_derived);
+            queue_schedule_timeout_microtask(future);
+            if (!second_past) second_past = past;
+        }
+        return past;
+    };
+    const minute_handler = () => {
+        const now = Date.now();
+        const past = now - now % minute_ms;
+        const future = past + minute_ms;
+        if (prepareUseTracked()) {
+            minute_ders.add(current_derived);
+            queue_schedule_timeout_microtask(future);
+            if (!minute_past) minute_past = past;
+        }
+        return past;
+    };
+    const local_hour_handler = () => {
+        const date = new Date();
+        const past = date.setHours(date.getHours(), 0, 0, 0);
+        const future = past + hour_ms;
+        if (prepareUseTracked()) {
+            local_hour_ders.add(current_derived);
+            queue_schedule_timeout_microtask(future);
+            if (!local_hour_past) local_hour_past = past;
+        }
+        return past;
+    };
+    const utc_hour_handler = () => {
+        const now = Date.now();
+        const past = now - now % hour_ms;
+        const future = past + hour_ms;
+        if (prepareUseTracked()) {
+            utc_hour_ders.add(current_derived);
+            queue_schedule_timeout_microtask(future);
+            if (!utc_hour_past) utc_hour_past = past;
+        }
+        return past;
+    };
+    const local_day_handler = () => {
+        const date = new Date();
+        const past = date.setHours(0, 0, 0, 0);
+        const future = past + day_ms;
+        if (prepareUseTracked()) {
+            local_day_ders.add(current_derived);
+            queue_schedule_timeout_microtask(future);
+            if (!local_day_past) local_day_past = past;
+        }
+        return past;
+    };
+    const utc_day_handler = () => {
+        const now = Date.now();
+        const past = now - now % day_ms;
+        const future = past + day_ms;
+        if (prepareUseTracked()) {
+            utc_day_ders.add(current_derived);
+            queue_schedule_timeout_microtask(future);
+            if (!utc_day_past) utc_day_past = past;
+        }
+        return past;
+    };
+
+    const proxy = DerivedDate.proxy;
+    return {
+        __proto__: null,
+        lrms: proxy(millisecond_handler),
+        lims: proxy(millisecond_handler),
+        urms: proxy(millisecond_handler),
+        uims: proxy(millisecond_handler),
+        lrse: proxy(second_handler),
+        lise: proxy(second_handler),
+        urse: proxy(second_handler),
+        uise: proxy(second_handler),
+        lrmi: proxy(minute_handler),
+        limi: proxy(minute_handler),
+        urmi: proxy(minute_handler),
+        uimi: proxy(minute_handler),
+        lrho: proxy(local_hour_handler),
+        liho: proxy(local_hour_handler),
+        urho: proxy(utc_hour_handler),
+        uiho: proxy(utc_hour_handler),
+        lrda: proxy(local_day_handler),
+        lida: proxy(local_day_handler),
+        urda: proxy(utc_day_handler),
+        uida: proxy(utc_day_handler),
+    };
+}();
+
+let invalidate_then_timeout = 0;
+let invalidate_then_timeout_until = 0;
+/** @type {(Set<WeakRef<Derived>> & {time: number})[]} */
+const invalidate_then_jobs = [];
+
+/** @param {number} time @returns {undefined} */
+function invalidateThen(time) {
+    if (prepareUseTracked()) {
+        if (!invalidate_then_timeout_until || time < invalidate_then_timeout_until) {
+            if (invalidate_then_timeout) clearTimeout(invalidate_then_timeout);
+            const delay = time - Date.now();
+            invalidate_then_timeout = setTimeout(invalidateThenTimeoutHandler, delay < 0 ? 0 : delay);
+            invalidate_then_timeout_until = time;
+        }
+
+        let low = 0, high = invalidate_then_jobs.length;
+
+        if (high && time <= invalidate_then_jobs[high - 1].time) {
+            low = high;
+        } else if (!(high && time >= invalidate_then_jobs[0].time)) {
+            while (low < high) {
+                const mid = (low + high) >> 1;
+                if (invalidate_then_jobs[mid].time < time) {
+                    low = mid + 1;
+                } else {
+                    high = mid;
+                }
+            }
+        }
+
+        if (invalidate_then_jobs[low] && invalidate_then_jobs[low].time === time) {
+            invalidate_then_jobs[low].add(current_derived);
+        } else {
+            const newSet = new Set();
+            newSet.time = time;
+            newSet.add(current_derived);
+            invalidate_then_jobs.splice(low, 0, newSet);
+        }
+    }
+}
+
+function invalidateThenTimeoutHandler() {
+    invalidate_then_timeout = 0;
+    invalidate_then_timeout_until = 0;
+    if (invalidate_then_jobs.length) return;
+    let now = Date.now();
+    do {
+        const last = invalidate_then_jobs[invalidate_then_jobs.length - 1];
+        if (last.time > now) {
+            now = Date.now();
+            if (last.time > now) {
+                invalidate_then_timeout = setTimeout(invalidateThenTimeoutHandler, last.time - now);
+                invalidate_then_timeout_until = last.time;
+                return;
+            }
+        }
+        invalidateDerivationSet(last);
+    } while (--invalidate_then_jobs.length);
+}
 
 //#endregion
 //#region state object
@@ -2698,14 +3069,91 @@ defineProperties(StatePromise, {
 });
 
 //#endregion
+//#region state date
+
+function StateDate() {
+    if (!new.target) throw new TypeError("Constructor StateDate requires 'new'");
+    const value = Reflect.construct(Date, arguments, new.target);
+    Object.defineProperty(value, sym_ders, { value: new Set() });
+    Object.defineProperty(value, sym_tracked, { value });
+    return value;
+}
+
+const StateDatePrototype = { __proto__: DerivedDatePrototype };
+
+StateDate.prototype = StateDatePrototype;
+
+//#endregion
+//#region state & derived date methods
+
+(function () {
+    /** @type {(string | symbol)[]} */
+    const read_methods = "toString,toDateString,toTimeString,toLocaleString,toLocaleDateString,toLocaleTimeString,valueOf,getTime,getFullYear,getUTCFullYear,getMonth,getUTCMonth,getDate,getUTCDate,getDay,getUTCDay,getHours,getUTCHours,getMinutes,getUTCMinutes,getSeconds,getUTCSeconds,getMilliseconds,getUTCMilliseconds,getTimezoneOffset,toUTCString,toISOString,toJSON".split(',');
+    const write_methods = "setTime,setMilliseconds,setUTCMilliseconds,setSeconds,setUTCSeconds,setMinutes,setUTCMinutes,setHours,setUTCHours,setDate,setUTCDate,setMonth,setUTCMonth,setFullYear,setUTCFullYear".split(',');
+    read_methods.unshift(Symbol.toPrimitive);
+    for (let i = 0; i < read_methods.length; i++) {
+        const name = read_methods[i];
+        const method = Date.prototype[name];
+        Object.defineProperty(StateDatePrototype, name, {
+            value: {
+                [name]() {
+                    if (prepareUseTracked()) this[sym_ders].add(current_derived);
+                    return method.apply(this, arguments);
+                }
+            }[name],
+            writable: true,
+            configurable: true,
+        });
+        Object.defineProperty(DerivedDatePrototype, name, {
+            value: {
+                [name]() {
+                    const time = this[sym_handler]();
+                    if (typeof time != "number") {
+                        Date.prototype.setTime.call(this, 0 / 0);
+                        throw new TypeError("DerivedDate proxy did not return a number");
+                    }
+                    Date.prototype.setTime.call(this, time);
+                    return method.apply(this, arguments);
+                }
+            }[name],
+            writable: true,
+            configurable: true,
+        });
+    }
+    for (let i = 0; i < write_methods.length; i++) {
+        const name = write_methods[i];
+        const method = Date.prototype[name];
+        Object.defineProperty(StateDatePrototype, name, {
+            value: {
+                [name]() {
+                    invalidateDerivationSet(this[sym_ders]);
+                    return method.apply(this, arguments);
+                }
+            }[name],
+            writable: true,
+            configurable: true,
+        });
+        Object.defineProperty(DerivedDatePrototype, name, {
+            value: {
+                [name]() {
+                    mutationOnDerivedDate();
+                }
+            }[name],
+            writable: true,
+            configurable: true,
+        });
+    }
+}());
+
+//#endregion
 //#region array extensions
 
 defineProperties(Array.prototype, {
-    $slot() {},
+    $slot() { },
     $slots() { return Array(this.length); },
     $slotValue() { return sym_empty; },
     $slotExists() { return false; },
-    $use() {},
+    $use() { },
     $map(derivator, thisArg) {
         return this.map(callbackfn, thisArg);
         function callbackfn(value, number, array) {
@@ -2777,6 +3225,20 @@ function promiseUseSetBySymbol(promise, sym) {
         track(promise);
     }
 }
+
+//#endregion
+//#region date extensions
+
+defineProperties(Date.prototype, {
+    $isPast() {
+        const time = this.getTime();
+        return Date.now() >= time || !!invalidateThen(time);
+    },
+    $isFuture() {
+        const time = this.getTime();
+        return Date.now() < time && !invalidateThen(time);
+    },
+});
 
 //#endregion
 //#region Signal
@@ -2881,7 +3343,7 @@ function Signal() {
 }
 
 defineProperties(Signal, {
-    null: Object.setPrototypeOf(function nopSignal() {}, defineProperties({ __proto__: SignalPrototype }, {
+    null: Object.setPrototypeOf(function nopSignal() { }, defineProperties({ __proto__: SignalPrototype }, {
         try() { return null; },
         on() {
             const args = arguments;
