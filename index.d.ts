@@ -114,126 +114,128 @@ export interface Derived<out T> {
     [Symbol.asyncIterator](): T extends { [Symbol.asyncIterator](): infer U } ? U : undefined;
     [Symbol.iterator](): T extends { [Symbol.iterator](): infer U } ? U : undefined;
 }
-export const Derived: {
-    new <T>(derivator: () => T): Derived<Derived.Use<T>>;
-    new <T>(name: string, derivator: () => T): Derived<Derived.Use<T>>;
-    prototype: Derived<any>,
-
-    /** **Summary**: runs a block of code without creating dependencies
-     *
-     * this is useful when you have a block of code somewhere that tracks dependencies such as inside an affector
-     *
-     * but that code is only meant to run in response to something and therefore not actually meant to create the dependencies
-     */
-    now<T>(derivator: () => T): Derived.Use<T>;
-
-    /** **Summary**: turns values that may or may not be wrapped in Derived into always wrapped in Derived
-     *
-     * useful to work with `T | Derived<T>` or `Derived.Or<T>` types
-     *
-     * **Reference**: if you pass an instance of `Derived`, return it, otherwise, wrap it in a `Derived` that will never change
-     */
-    from<T>(value: T): Derived<Derived.Use<T>>;
-
-    /** **Summary**: turns values that may or may not be wrapped in Derived into always plain values
-     *
-     * useful to work with `T | Derived<T>` or `Derived.Or<T>` types
-     *
-     * **Reference**: while value is an instance of `Derived`, calls it, then returns value
-     */
-    use<T>(value: T): Derived.Use<T>;
-
-    /** **Summary**: creates a derived that gives a view into a property of an object
-     *
-     * useful for passing a property where a derived is expected
-     *
-     * **Reference**: returns a new cheap derivation that when called gets the specified key from the target
-     */
-    prop<T extends object, K extends keyof T>(target: T, key: K): Derived<Derived.Use<T[K]>>;
-    prop<T extends object, K extends keyof T>(name: string, target: T, key: K): Derived<Derived.Use<T[K]>>;
-
-    /** **Summary**: creates a derived without memoization
-     *
-     * as the name suggests this is for times when the derivator is cheap to run, and memoization would just be wasting time and memory
-     *
-     * if also makes sense to use cheap when the memoization would never do anything, such as when the derivation always creates a new (non frozen) object, in these cases disabling memoization also makes sense
-     *
-     * note that this does not mean that dependencies won't be added, this just means that they won't be added to this derivation in particular, but to the surrounding derivation instead
-     *
-     * **Reference**: creates an instance of derived that when called, calls derivator and passes it through `Derived.use` before returning the value
-     *
-     * note also that this is not exactly equivalent to a regular derivation, since dependencies are not tracked, derivator won't rerun if it invalidated it owns dependencies
-     *
-     * most of the time this won't be an issue since usually the derivator will be running inside a regular derivation or inside an effect that will rerun when that happens
-     */
-    cheap<T>(derivator: () => T): Derived<Derived.Use<T>>;
-    cheap<T>(name: string, derivator: () => T): Derived<Derived.Use<T>>;
-
-    /** **Summary**: A derived array is an array where its values are not stored in the array but rather somewhere else
-     *
-     * when the values of a derived are read, it runs code to derive it from somewhere else, possibly with memoization, no state (other than caching) is stored on derived arrays
-     *
-     * because of this they are naturally read-only, possibly not immutable, because wherever they are reading their data could change, but they can never be mutated directly
-     *
-     * derived arrays cannot be constructed directly, see `Derived.Array.proxy` or `Derived.Array.range` for examples
-     */
-    Array: {
-        new(...args: never): never;
-        /** **Summary**: creates a read-only derived array, whose values are derived from handler functions every time they are read
-         *
-         * the handler object must have the following methods:
-         *
-         * - **length** - returns the length of the array
-         * - **item** - returns the value of the item at the specified index or `Derived.Array.empty` to indicate an empty slot
-         * - **has** - (optional) returns true if the index is present, by default calls item and checks if it returned `Derived.Array.empty`
-         * - **symbol** - (optional) returns the symbol that represents the slot, or undefined if the specified index is after the end of the array
-         * - **symbols** - (optional) returns all the symbol that represents the slots as of currently, used to avoid having to call symbol in a loop when all symbols are needed
-         * - **use** - (optional) use the entire array, "use" as in add a dependency of the current derivator to the entire array
-         *
-         * if `symbol` is implemented, then symbols may passed as the index to `item` and `has`, essentially, symbols represent the slot itself as it is shifted around the derived array
-         *
-         * this gives consumers a way to track the slots of an array accross mutations
-         *
-         * for example if you have an array of length 1 where the first item returns a particular symbol,
-         * if an item were inserted at the beggining, making the first item now the second item, it should still return that particular symbol,
-         * if the now second item were removed, then the methods `item` and `has` with the symbol should report that is does not exist (by returning `Derived.Array.empty` and false respectively)
-         *
-         * if you don't implement `symbol`, then `item` and `has` will never be called with a symbol for the index
-         */
-        proxy<T, H extends Derived.Array.ProxyHandlerWithoutSymbol<T>>(target: T, handler: H): Exclude<ReturnType<H["item"]>, typeof Derived.Array.empty>[];
-        proxy<T, H extends Derived.Array.ProxyHandler<T>>(target: T, handler: H): Exclude<ReturnType<H["item"]>, typeof Derived.Array.empty>[];
-
-        /** **Summary**: creates a derived array from a range from 0 up to the specified length exclusive, optionally transformed with a function first, and with the length possibly being derived from somewhere else
-         *
-         * this allows you to do the equivalent of a for loop in derivations
-         *
-         * the function is executed within a derivation so its safe to depend on data, and expect the resulting array to update automatically
-         *
-         * that also means that calls to fn are memoized and lazy, rerunning only when the value is requested and if dependencies changed
-         */
-        range<T>(length: Derived.Or<number>, fn: (index: number) => T): Derived.Use<T>[];
-        range(length: Derived.Or<number>): number[];
-
-        /** **Summary**: A symbol that represents the absence of an array item, expected to be returned on the `Derived.Array.ProxyHandler.item` when getting items past the array's end or at holes (sparse arrays) */
-        readonly empty: unique symbol;
-    };
-
-    /** set this property to a function to log when any `WeakRef` created by rubedo is garbage collected */
-    debugLogWeakRefCleanUp: ((message: string) => void) | null;
-
-    /** what to do when a derivation or state is used outside a derivation, default is `allow`
-     *
-     * uses inside of `Derived.now` and calls to the `now` method are always allowed, even though they avoid creating dependencies
-     */
-    onUseDerivedOutsideOfDerivation: "allow" | "throw" | ((message: string) => void);
-
-    /** what to do when a tracked object is used outside a derivation, default is `allow`
-     *
-     * uses inside of `Derived.now` are always allowed, even though they avoid creating dependencies
-     */
-    onUseTrackedOutsideOfDerivation: "allow" | "throw" | ((message: string) => void);
-};
+export const Derived: Derived.Constructor;
 export namespace Derived {
+    interface Constructor {
+        new <T>(derivator: () => T): Derived<Derived.Use<T>>;
+        new <T>(name: string, derivator: () => T): Derived<Derived.Use<T>>;
+        prototype: Derived<any>,
+    
+        /** **Summary**: runs a block of code without creating dependencies
+         *
+         * this is useful when you have a block of code somewhere that tracks dependencies such as inside an affector
+         *
+         * but that code is only meant to run in response to something and therefore not actually meant to create the dependencies
+         */
+        now<T>(derivator: () => T): Derived.Use<T>;
+    
+        /** **Summary**: turns values that may or may not be wrapped in Derived into always wrapped in Derived
+         *
+         * useful to work with `T | Derived<T>` or `Derived.Or<T>` types
+         *
+         * **Reference**: if you pass an instance of `Derived`, return it, otherwise, wrap it in a `Derived` that will never change
+         */
+        from<T>(value: T): Derived<Derived.Use<T>>;
+    
+        /** **Summary**: turns values that may or may not be wrapped in Derived into always plain values
+         *
+         * useful to work with `T | Derived<T>` or `Derived.Or<T>` types
+         *
+         * **Reference**: while value is an instance of `Derived`, calls it, then returns value
+         */
+        use<T>(value: T): Derived.Use<T>;
+    
+        /** **Summary**: creates a derived that gives a view into a property of an object
+         *
+         * useful for passing a property where a derived is expected
+         *
+         * **Reference**: returns a new cheap derivation that when called gets the specified key from the target
+         */
+        prop<T extends object, K extends keyof T>(target: T, key: K): Derived<Derived.Use<T[K]>>;
+        prop<T extends object, K extends keyof T>(name: string, target: T, key: K): Derived<Derived.Use<T[K]>>;
+    
+        /** **Summary**: creates a derived without memoization
+         *
+         * as the name suggests this is for times when the derivator is cheap to run, and memoization would just be wasting time and memory
+         *
+         * if also makes sense to use cheap when the memoization would never do anything, such as when the derivation always creates a new (non frozen) object, in these cases disabling memoization also makes sense
+         *
+         * note that this does not mean that dependencies won't be added, this just means that they won't be added to this derivation in particular, but to the surrounding derivation instead
+         *
+         * **Reference**: creates an instance of derived that when called, calls derivator and passes it through `Derived.use` before returning the value
+         *
+         * note also that this is not exactly equivalent to a regular derivation, since dependencies are not tracked, derivator won't rerun if it invalidated it owns dependencies
+         *
+         * most of the time this won't be an issue since usually the derivator will be running inside a regular derivation or inside an effect that will rerun when that happens
+         */
+        cheap<T>(derivator: () => T): Derived<Derived.Use<T>>;
+        cheap<T>(name: string, derivator: () => T): Derived<Derived.Use<T>>;
+    
+        /** **Summary**: A derived array is an array where its values are not stored in the array but rather somewhere else
+         *
+         * when the values of a derived are read, it runs code to derive it from somewhere else, possibly with memoization, no state (other than caching) is stored on derived arrays
+         *
+         * because of this they are naturally read-only, possibly not immutable, because wherever they are reading their data could change, but they can never be mutated directly
+         *
+         * derived arrays cannot be constructed directly, see `Derived.Array.proxy` or `Derived.Array.range` for examples
+         */
+        Array: {
+            new(...args: never): never;
+            /** **Summary**: creates a read-only derived array, whose values are derived from handler functions every time they are read
+             *
+             * the handler object must have the following methods:
+             *
+             * - **length** - returns the length of the array
+             * - **item** - returns the value of the item at the specified index or `Derived.Array.empty` to indicate an empty slot
+             * - **has** - (optional) returns true if the index is present, by default calls item and checks if it returned `Derived.Array.empty`
+             * - **symbol** - (optional) returns the symbol that represents the slot, or undefined if the specified index is after the end of the array
+             * - **symbols** - (optional) returns all the symbol that represents the slots as of currently, used to avoid having to call symbol in a loop when all symbols are needed
+             * - **use** - (optional) use the entire array, "use" as in add a dependency of the current derivator to the entire array
+             *
+             * if `symbol` is implemented, then symbols may passed as the index to `item` and `has`, essentially, symbols represent the slot itself as it is shifted around the derived array
+             *
+             * this gives consumers a way to track the slots of an array accross mutations
+             *
+             * for example if you have an array of length 1 where the first item returns a particular symbol,
+             * if an item were inserted at the beggining, making the first item now the second item, it should still return that particular symbol,
+             * if the now second item were removed, then the methods `item` and `has` with the symbol should report that is does not exist (by returning `Derived.Array.empty` and false respectively)
+             *
+             * if you don't implement `symbol`, then `item` and `has` will never be called with a symbol for the index
+             */
+            proxy<T, H extends Derived.Array.ProxyHandlerWithoutSymbol<T>>(target: T, handler: H): Exclude<ReturnType<H["item"]>, typeof Derived.Array.empty>[];
+            proxy<T, H extends Derived.Array.ProxyHandler<T>>(target: T, handler: H): Exclude<ReturnType<H["item"]>, typeof Derived.Array.empty>[];
+    
+            /** **Summary**: creates a derived array from a range from 0 up to the specified length exclusive, optionally transformed with a function first, and with the length possibly being derived from somewhere else
+             *
+             * this allows you to do the equivalent of a for loop in derivations
+             *
+             * the function is executed within a derivation so its safe to depend on data, and expect the resulting array to update automatically
+             *
+             * that also means that calls to fn are memoized and lazy, rerunning only when the value is requested and if dependencies changed
+             */
+            range<T>(length: Derived.Or<number>, fn: (index: number) => T): Derived.Use<T>[];
+            range(length: Derived.Or<number>): number[];
+    
+            /** **Summary**: A symbol that represents the absence of an array item, expected to be returned on the `Derived.Array.ProxyHandler.item` when getting items past the array's end or at holes (sparse arrays) */
+            readonly empty: unique symbol;
+        };
+    
+        /** set this property to a function to log when any `WeakRef` created by rubedo is garbage collected */
+        debugLogWeakRefCleanUp: ((message: string) => void) | null;
+    
+        /** what to do when a derivation or state is used outside a derivation, default is `allow`
+         *
+         * uses inside of `Derived.now` and calls to the `now` method are always allowed, even though they avoid creating dependencies
+         */
+        onUseDerivedOutsideOfDerivation: "allow" | "throw" | ((message: string) => void);
+    
+        /** what to do when a tracked object is used outside a derivation, default is `allow`
+         *
+         * uses inside of `Derived.now` are always allowed, even though they avoid creating dependencies
+         */
+        onUseTrackedOutsideOfDerivation: "allow" | "throw" | ((message: string) => void);
+    }
+
     /** **Summary**: a type alias to define that you expect some `T` or a derivation that returns a `T`
      *
      * use this to express that somewhere accepts derived but also accepts just the plain values for convenience
@@ -332,282 +334,283 @@ export interface State<in out T> extends Derived<T> {
     /** the name specified when creating this object */
     readonly name: string;
 }
-export const State: {
-    new <T>(value: T): State<T>;
-    new <T>(name: string, value: T): State<T>;
-    prototype: State<any>;
-
-    /** **Summary**: adds tracking to an object so rubedo can notice when it is read and written to
-     *
-     * rubedo can create dependency trees and update graphs without a compiler, but without a dedicated compilation step, it may need to give it a hand so it can do its job
-     *
-     * if something is not tracked, it means rubedo won't be able to rerun derivations when that thing changes, this can be the cause of very subtle bugs
-     *
-     * putting an object in a tracked object causes it to be also be tracked, in other it spreads to the best of its ability
-     *
-     * when tracking is first added to an object, its properties are recursively searched for more things to add tracking to
-     *
-     * the following things can be tracked:
-     *
-     * 1. **plain objects** (with default object prototype, only string properties)
-     * 2. **null prototype objects** (with default null prototype, only string properties)
-     * 3. **TrackedObject and inheritors** (automatically tracked on constructor, only string properties)
-     * 4. **plain arrays** (default array prototype and Array.isArray, only items and length)
-     * 5. **TrackedArray and inheritors** (automatically tracked on constructor, only items and length)
-     * 6. **Map** (with default prototype, only keys, values and size)
-     * 7. **Set** (with default prototype, only items and size)
-     * 8. **Promise** (with default prototype, only the value or rejection of the promise)
-     *
-     * also note that some tracking requires wrapping the object in a proxy,
-     * and thus the original value may not tracked,
-     * this means references created before the call to track may be used to mutate the object without rubedo noticing
-     *
-     * ```
-     * const not_tracked = {};
-     * const tracked = State.track(not_tracked);
-     * // not_tracked is still not tracked
-     * ```
-     *
-     * everything else is not tracked, user defined classes or any objects that are not plain are not tracked
-     *
-     * the return values of derivations and the values in the state class are automatically tracked
-     *
-     * tracking a value that is already tracked is a noop
-     *
-     * returns the value passed in, never throws errors
-     */
-    track<T>(value: T): T;
-
-    /** **Summary**: like `Object.freeze` but tracks items before freezing, allowing the object to be memoized
-     *
-     * this is useful to create "records" also known as "data objects", while also tracking the values inside
-     *
-     * that allows you to create a derivation that returns objects that can still be memoized
-     *
-     * because without it you would be creating a new object every time, invalidating dependent derivations every time
-     *
-     * note that you can also use `Object.freeze` to create data objects, but the properties won't be tracked (eg: wrapping objects and arrays in a proxy)
-     *
-     * frozen objects have special handling when being compared in rubedo
-     *
-     * frozen objects are compared equal to other frozen objects with the same string data properties and the same prototype, however the order can vary
-     *
-     * does not freeze recursively, just like `Object.freeze`, but tracks recursively just like `State.track`
-     *
-     * returns the same object passed in, does not wrap it in a proxy
-     */
-    freeze<T>(value: T): Readonly<T>;
-
-    /** **Summary**: like `Object.is`, but uses structural equality for frozen objects
-     *
-     * this function is used internally to determine if dependant derivations should be invalidated
-     *
-     * **Reference**:
-     *
-     * has the semantics of `Object.is`, but frozen objects (`Object.isFrozen`) with the same string keyed properties and the same prototype are compared equal
-     *
-     * symbol keyed properties, property order and property enumerability are ignored
-     *
-     * works recursively, but may return false for self referential nested objects
-     *
-     * never throws, exceptions thrown in traps of the objects being compared are caught and discarded, when this happens this function returns false
-     */
-    is(a: any, b: any): boolean;
-
-    /** **Summary**: creates a state that gives a view into a property of an object
-     *
-     * sometimes you want to pass a property "by reference", giving someone a state that refers to that property
-     *
-     * ```
-     * declare function create_input(value: State<string>): HTMLInputElement;
-     *
-     * const my_state = State.track({
-     *     username: "",
-     *     password: "",
-     * });
-     * const username_input = create_input(my_state.username); // wrong, not passing it "by reference"
-     * ```
-     *
-     * prop allows you to create a state that when read, it reads from your property, and when it is written to, it writes to your property
-     *
-     * allowing you to pass properties "by reference"
-     *
-     * ```
-     * const username_input = create_input(State.prop(my_state, "username")); // correct, passing it "by reference"
-     * ```
-     *
-     * **Reference**: creates a State object that when called reads the property,
-     * calls to the set method sets the property,
-     * and calls to mut, reads the property inside of `Derived.now` and the new value sets the property
-     */
-    prop<T extends object, K extends keyof T>(target: T, key: K): State<T[K]>;
-    prop<T extends object, K extends keyof T>(name: string, target: T, key: K): State<T[K]>;
-
-    /** **Summary**: create a proxy state, that gives you full control over how the value is read and written
-     *
-     * no caching is ever done, every access to it calls the getter, calls to the set method call the setter, calls to the mut method call the getter and then the setter
-     *
-     * **Reference**: creates a State object that when called, calls the getter,
-     * calls to the set call the setter
-     * and calls to mut, call the getter inside of `Derived.now` and the new value is used to call the setter
-     */
-    proxy<T>(getter: () => T, setter: (value: T) => void): State<T>;
-    proxy<T>(name: string, getter: () => T, setter: (value: T) => void): State<T>;
-
-    /** **Summary**: an object that is tracked, changes to it can be noticed by derivations that use it
-     *
-     * you can inherit from this to allow your custom classes to have their properties tracked (custom classes are not tracked by default, see {@link State.track})
-     *
-     * you can use `instanceof State.Object` to test if an object is tracked, it also returns true for all tracked objects (`State.Object`, `State.Array`, `State.Map`, `State.Set` and `State.Promise`)
-     *
-     * **Reference**: creates a new object with the correct prototype and already wrapped in a proxy
-     */
-    Object: {
-        new(): Object;
-        (): Object;
-        /** **Summary**: use the entire object, the current derivator will rerun if anything in the object changes
-         *
-         * this can be used as an optimization to avoid adding dependencies on each and every property individually by using `Derived.now` while still being correct
-         *
-         * **Reference**: adds a "all" dependency of this object to the current derivator, does nothing if target is not tracked or if no derivator is currently running
-         */
-        use(target: object): void;
-        readonly prototype: Object;
-        /** does the same as `Object.fromEntries`, but the created object is tracked and wrapped in a proxy */
-        fromEntries<T = any>(entries: Iterable<readonly [PropertyKey, T]>): { [k: string]: T; };
-        /** does the same as `Object.fromEntries`, but the created object is tracked and wrapped in a proxy */
-        fromEntries(entries: Iterable<readonly any[]>): any;
-        /** does the same as `Object.create`, but the created object is tracked and wrapped in a proxy */
-        create(o: object | null): any;
-        /** does the same as `Object.create`, but the created object is tracked and wrapped in a proxy */
-        create(o: object | null, properties: PropertyDescriptorMap & ThisType<any>): any;
-        /** does the same as `Object.groupBy`, but the created object is tracked and wrapped in a proxy */
-        groupBy<K extends PropertyKey, T>(
-            items: Iterable<T>,
-            keySelector: (item: T, index: number) => K,
-        ): Partial<Record<K, T[]>>;
-    };
-    /** **Summary**: an array that is tracked, changes to it can be noticed by derivations that use it
-     *
-     * you can inherit from this to allow your custom classes to have their properties tracked (custom classes are not tracked by default, see {@link State.track})
-     *
-     * you can use `instanceof State.Array` to test if an array is tracked, `instanceof State.Object` also returns true for tracked arrays
-     *
-     * **Reference**: creates a new array with the correct prototype and already wrapped in a proxy
-     */
-    Array: {
-        new(arrayLength?: number): any[];
-        new <T>(arrayLength: number): T[];
-        new <T>(...items: T[]): T[];
-        (arrayLength?: number): any[];
-        <T>(arrayLength: number): T[];
-        <T>(...items: T[]): T[];
-        new <T = any>(arrayLength?: number): T[];
-        <T = any>(arrayLength?: number): T[];
-        /** **Summary**: use the entire array, the current derivator will rerun if anything in the array changes
-         *
-         * this can be used as an optimization to avoid adding dependencies on each and every item individually by using `Derived.now` while still being correct
-         *
-         * **Reference**: adds a "all" dependency of this array to the current derivator, does nothing if target is not tracked or if no derivator is currently running
-         */
-        use(target: unknown[]): void;
-        readonly prototype: any[];
-        /** does the same as `Array.from`, but the created array is tracked and wrapped in a proxy */
-        from<T>(iterable: Iterable<T> | ArrayLike<T>): T[];
-        /** does the same as `Array.from`, but the created array is tracked and wrapped in a proxy */
-        from<T, U>(iterable: Iterable<T> | ArrayLike<T>, mapfn: (v: T, k: number) => U, thisArg?: any): U[];
-        /** does the same as `Array.of`, but the created array is tracked and wrapped in a proxy */
-        of<T>(...items: T[]): T[];
-    };
-    /** **Summary**: a map that is tracked, changes to it can be noticed by derivations that use it
-     *
-     * you can inherit from this to allow your custom map classes to have their values tracked (custom classes are not tracked by default, see {@link State.track})
-     *
-     * you can use `instanceof State.Map` to test if a map is tracked, `instanceof State.Object` also returns true for tracked maps
-     *
-     * **Reference**: creates a new map with the correct prototype
-     */
-    Map: {
-        new <K, V>(iterable?: Iterable<readonly [K, V]> | null | undefined): Map<K, V>;
-        /** **Summary**: use the entire map, the current derivator will rerun if anything in the map changes
-         *
-         * this can be used as an optimization to avoid adding dependencies on each and every item individually by using `Derived.now` while still being correct
-         *
-         * **Reference**: adds a "all" dependency of this map to the current derivator, does nothing if target is not tracked or if no derivator is currently running
-         */
-        use(target: Map<unknown, unknown>): void;
-        readonly prototype: Map<any, any>;
-    };
-    /** **Summary**: a set that is tracked, changes to it can be noticed by derivations that use it
-     *
-     * you can inherit from this to allow your custom set classes to have their values tracked (custom classes are not tracked by default, see {@link State.track})
-     *
-     * you can use `instanceof State.Set` to test if an object is tracked, `instanceof State.Object` also returns true for tracked sets
-     *
-     * **Reference**: creates a new set with the correct prototype
-     */
-    Set: {
-        new <T>(iterable?: Iterable<T> | null | undefined): Set<T>;
-        /** **Summary**: use the entire set, the current derivator will rerun if anything in the set changes
-         *
-         * this can be used as an optimization to avoid adding dependencies on each and every item individually by using `Derived.now` while still being correct
-         *
-         * **Reference**: adds a "all" dependency of this set to the current derivator, does nothing if target is not tracked or if no derivator is currently running
-         */
-        use(target: Set<unknown>): void;
-        readonly prototype: Set<any>;
-    };
-    /** **Summary**: a promise that is tracked, its resolution and rejection can be noticed by derivations that use it
-     *
-     * you can inherit from this to allow your custom promise classes to be created already tracked (custom classes are not tracked by default, see {@link State.track})
-     *
-     * you can use `instanceof State.Promise` to test if an object is tracked, `instanceof State.Object` also returns true for tracked promises
-     *
-     * **Reference**: creates a new promise with the correct prototype
-     */
-    Promise: {
-        new <T>(executor: (resolve: (value: T | PromiseLike<T>) => void, reject: (reason?: any) => void) => void): Promise<T>;
-        /** **Summary**: use the entire promise, the current derivator will rerun if the promise resolves or rejects
-         *
-         * this has no real performance improvements over depending on resolution and rejection separately, this function is added mostly for completeness, although it does add tracking, but it should not be depended upon for this
-         *
-         * **Reference**: adds a dependency of the resolution and rejection of this promise to the current derivator, if target is not tracked then it adds tracking before adding the dependencies, does nothing if the promise is known to be resolved or if no derivator is currently running
-         */
-        use(target: Promise<unknown>): void;
-        readonly prototype: Promise<any>;
-        /** does the same as `Promise.all`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
-        all<T>(values: Iterable<T | PromiseLike<T>>): Promise<Awaited<T>[]>;
-        /** does the same as `Promise.race`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
-        race<T>(values: Iterable<T | PromiseLike<T>>): Promise<Awaited<T>>;
-        /** does the same as `Promise.all`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
-        all<T extends readonly unknown[] | []>(values: T): Promise<{ -readonly [P in keyof T]: Awaited<T[P]>; }>;
-        /** does the same as `Promise.race`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
-        race<T extends readonly unknown[] | []>(values: T): Promise<Awaited<T[number]>>;
-        /** does the same as `Promise.reject`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
-        reject<T = never>(reason?: any): Promise<T>;
-        /** does the same as `Promise.resolve`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
-        resolve(): Promise<void>;
-        /** does the same as `Promise.resolve`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
-        resolve<T>(value: T): Promise<Awaited<T>>;
-        /** does the same as `Promise.resolve`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
-        resolve<T>(value: T | PromiseLike<T>): Promise<Awaited<T>>;
-        /** does the same as `Promise.allSettled`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
-        allSettled<T extends readonly unknown[] | []>(values: T): Promise<{ -readonly [P in keyof T]: PromiseSettledResult<Awaited<T[P]>>; }>;
-        /** does the same as `Promise.allSettled`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
-        allSettled<T>(values: Iterable<T | PromiseLike<T>>): Promise<PromiseSettledResult<Awaited<T>>[]>;
-        /** does the same as `Promise.any`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
-        any<T extends readonly unknown[] | []>(values: T): Promise<Awaited<T[number]>>;
-        /** does the same as `Promise.any`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
-        any<T>(values: Iterable<T | PromiseLike<T>>): Promise<Awaited<T>>;
-        /** does the same as `Promise.withResolvers`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
-        withResolvers<T>(): {
-            promise: Promise<T>;
-            resolve: (value: T | PromiseLike<T>) => void;
-            reject: (reason?: any) => void;
-        };
-    };
-};
+export const State: State.Constructor;
 export namespace State {
+    interface Constructor {
+        new <T>(value: T): State<T>;
+        new <T>(name: string, value: T): State<T>;
+        prototype: State<any>;
+    
+        /** **Summary**: adds tracking to an object so rubedo can notice when it is read and written to
+         *
+         * rubedo can create dependency trees and update graphs without a compiler, but without a dedicated compilation step, it may need to give it a hand so it can do its job
+         *
+         * if something is not tracked, it means rubedo won't be able to rerun derivations when that thing changes, this can be the cause of very subtle bugs
+         *
+         * putting an object in a tracked object causes it to be also be tracked, in other it spreads to the best of its ability
+         *
+         * when tracking is first added to an object, its properties are recursively searched for more things to add tracking to
+         *
+         * the following things can be tracked:
+         *
+         * 1. **plain objects** (with default object prototype, only string properties)
+         * 2. **null prototype objects** (with default null prototype, only string properties)
+         * 3. **TrackedObject and inheritors** (automatically tracked on constructor, only string properties)
+         * 4. **plain arrays** (default array prototype and Array.isArray, only items and length)
+         * 5. **TrackedArray and inheritors** (automatically tracked on constructor, only items and length)
+         * 6. **Map** (with default prototype, only keys, values and size)
+         * 7. **Set** (with default prototype, only items and size)
+         * 8. **Promise** (with default prototype, only the value or rejection of the promise)
+         *
+         * also note that some tracking requires wrapping the object in a proxy,
+         * and thus the original value may not tracked,
+         * this means references created before the call to track may be used to mutate the object without rubedo noticing
+         *
+         * ```
+         * const not_tracked = {};
+         * const tracked = State.track(not_tracked);
+         * // not_tracked is still not tracked
+         * ```
+         *
+         * everything else is not tracked, user defined classes or any objects that are not plain are not tracked
+         *
+         * the return values of derivations and the values in the state class are automatically tracked
+         *
+         * tracking a value that is already tracked is a noop
+         *
+         * returns the value passed in, never throws errors
+         */
+        track<T>(value: T): T;
+    
+        /** **Summary**: like `Object.freeze` but tracks items before freezing, allowing the object to be memoized
+         *
+         * this is useful to create "records" also known as "data objects", while also tracking the values inside
+         *
+         * that allows you to create a derivation that returns objects that can still be memoized
+         *
+         * because without it you would be creating a new object every time, invalidating dependent derivations every time
+         *
+         * note that you can also use `Object.freeze` to create data objects, but the properties won't be tracked (eg: wrapping objects and arrays in a proxy)
+         *
+         * frozen objects have special handling when being compared in rubedo
+         *
+         * frozen objects are compared equal to other frozen objects with the same string data properties and the same prototype, however the order can vary
+         *
+         * does not freeze recursively, just like `Object.freeze`, but tracks recursively just like `State.track`
+         *
+         * returns the same object passed in, does not wrap it in a proxy
+         */
+        freeze<T>(value: T): Readonly<T>;
+    
+        /** **Summary**: like `Object.is`, but uses structural equality for frozen objects
+         *
+         * this function is used internally to determine if dependant derivations should be invalidated
+         *
+         * **Reference**:
+         *
+         * has the semantics of `Object.is`, but frozen objects (`Object.isFrozen`) with the same string keyed properties and the same prototype are compared equal
+         *
+         * symbol keyed properties, property order and property enumerability are ignored
+         *
+         * works recursively, but may return false for self referential nested objects
+         *
+         * never throws, exceptions thrown in traps of the objects being compared are caught and discarded, when this happens this function returns false
+         */
+        is(a: any, b: any): boolean;
+    
+        /** **Summary**: creates a state that gives a view into a property of an object
+         *
+         * sometimes you want to pass a property "by reference", giving someone a state that refers to that property
+         *
+         * ```
+         * declare function create_input(value: State<string>): HTMLInputElement;
+         *
+         * const my_state = State.track({
+         *     username: "",
+         *     password: "",
+         * });
+         * const username_input = create_input(my_state.username); // wrong, not passing it "by reference"
+         * ```
+         *
+         * prop allows you to create a state that when read, it reads from your property, and when it is written to, it writes to your property
+         *
+         * allowing you to pass properties "by reference"
+         *
+         * ```
+         * const username_input = create_input(State.prop(my_state, "username")); // correct, passing it "by reference"
+         * ```
+         *
+         * **Reference**: creates a State object that when called reads the property,
+         * calls to the set method sets the property,
+         * and calls to mut, reads the property inside of `Derived.now` and the new value sets the property
+         */
+        prop<T extends object, K extends keyof T>(target: T, key: K): State<T[K]>;
+        prop<T extends object, K extends keyof T>(name: string, target: T, key: K): State<T[K]>;
+    
+        /** **Summary**: create a proxy state, that gives you full control over how the value is read and written
+         *
+         * no caching is ever done, every access to it calls the getter, calls to the set method call the setter, calls to the mut method call the getter and then the setter
+         *
+         * **Reference**: creates a State object that when called, calls the getter,
+         * calls to the set call the setter
+         * and calls to mut, call the getter inside of `Derived.now` and the new value is used to call the setter
+         */
+        proxy<T>(getter: () => T, setter: (value: T) => void): State<T>;
+        proxy<T>(name: string, getter: () => T, setter: (value: T) => void): State<T>;
+    
+        /** **Summary**: an object that is tracked, changes to it can be noticed by derivations that use it
+         *
+         * you can inherit from this to allow your custom classes to have their properties tracked (custom classes are not tracked by default, see {@link State.track})
+         *
+         * you can use `instanceof State.Object` to test if an object is tracked, it also returns true for all tracked objects (`State.Object`, `State.Array`, `State.Map`, `State.Set` and `State.Promise`)
+         *
+         * **Reference**: creates a new object with the correct prototype and already wrapped in a proxy
+         */
+        Object: {
+            new(): Object;
+            (): Object;
+            /** **Summary**: use the entire object, the current derivator will rerun if anything in the object changes
+             *
+             * this can be used as an optimization to avoid adding dependencies on each and every property individually by using `Derived.now` while still being correct
+             *
+             * **Reference**: adds a "all" dependency of this object to the current derivator, does nothing if target is not tracked or if no derivator is currently running
+             */
+            use(target: object): void;
+            readonly prototype: Object;
+            /** does the same as `Object.fromEntries`, but the created object is tracked and wrapped in a proxy */
+            fromEntries<T = any>(entries: Iterable<readonly [PropertyKey, T]>): { [k: string]: T; };
+            /** does the same as `Object.fromEntries`, but the created object is tracked and wrapped in a proxy */
+            fromEntries(entries: Iterable<readonly any[]>): any;
+            /** does the same as `Object.create`, but the created object is tracked and wrapped in a proxy */
+            create(o: object | null): any;
+            /** does the same as `Object.create`, but the created object is tracked and wrapped in a proxy */
+            create(o: object | null, properties: PropertyDescriptorMap & ThisType<any>): any;
+            /** does the same as `Object.groupBy`, but the created object is tracked and wrapped in a proxy */
+            groupBy<K extends PropertyKey, T>(
+                items: Iterable<T>,
+                keySelector: (item: T, index: number) => K,
+            ): Partial<Record<K, T[]>>;
+        };
+        /** **Summary**: an array that is tracked, changes to it can be noticed by derivations that use it
+         *
+         * you can inherit from this to allow your custom classes to have their properties tracked (custom classes are not tracked by default, see {@link State.track})
+         *
+         * you can use `instanceof State.Array` to test if an array is tracked, `instanceof State.Object` also returns true for tracked arrays
+         *
+         * **Reference**: creates a new array with the correct prototype and already wrapped in a proxy
+         */
+        Array: {
+            new(arrayLength?: number): any[];
+            new <T>(arrayLength: number): T[];
+            new <T>(...items: T[]): T[];
+            (arrayLength?: number): any[];
+            <T>(arrayLength: number): T[];
+            <T>(...items: T[]): T[];
+            new <T = any>(arrayLength?: number): T[];
+            <T = any>(arrayLength?: number): T[];
+            /** **Summary**: use the entire array, the current derivator will rerun if anything in the array changes
+             *
+             * this can be used as an optimization to avoid adding dependencies on each and every item individually by using `Derived.now` while still being correct
+             *
+             * **Reference**: adds a "all" dependency of this array to the current derivator, does nothing if target is not tracked or if no derivator is currently running
+             */
+            use(target: unknown[]): void;
+            readonly prototype: any[];
+            /** does the same as `Array.from`, but the created array is tracked and wrapped in a proxy */
+            from<T>(iterable: Iterable<T> | ArrayLike<T>): T[];
+            /** does the same as `Array.from`, but the created array is tracked and wrapped in a proxy */
+            from<T, U>(iterable: Iterable<T> | ArrayLike<T>, mapfn: (v: T, k: number) => U, thisArg?: any): U[];
+            /** does the same as `Array.of`, but the created array is tracked and wrapped in a proxy */
+            of<T>(...items: T[]): T[];
+        };
+        /** **Summary**: a map that is tracked, changes to it can be noticed by derivations that use it
+         *
+         * you can inherit from this to allow your custom map classes to have their values tracked (custom classes are not tracked by default, see {@link State.track})
+         *
+         * you can use `instanceof State.Map` to test if a map is tracked, `instanceof State.Object` also returns true for tracked maps
+         *
+         * **Reference**: creates a new map with the correct prototype
+         */
+        Map: {
+            new <K, V>(iterable?: Iterable<readonly [K, V]> | null | undefined): Map<K, V>;
+            /** **Summary**: use the entire map, the current derivator will rerun if anything in the map changes
+             *
+             * this can be used as an optimization to avoid adding dependencies on each and every item individually by using `Derived.now` while still being correct
+             *
+             * **Reference**: adds a "all" dependency of this map to the current derivator, does nothing if target is not tracked or if no derivator is currently running
+             */
+            use(target: Map<unknown, unknown>): void;
+            readonly prototype: Map<any, any>;
+        };
+        /** **Summary**: a set that is tracked, changes to it can be noticed by derivations that use it
+         *
+         * you can inherit from this to allow your custom set classes to have their values tracked (custom classes are not tracked by default, see {@link State.track})
+         *
+         * you can use `instanceof State.Set` to test if an object is tracked, `instanceof State.Object` also returns true for tracked sets
+         *
+         * **Reference**: creates a new set with the correct prototype
+         */
+        Set: {
+            new <T>(iterable?: Iterable<T> | null | undefined): Set<T>;
+            /** **Summary**: use the entire set, the current derivator will rerun if anything in the set changes
+             *
+             * this can be used as an optimization to avoid adding dependencies on each and every item individually by using `Derived.now` while still being correct
+             *
+             * **Reference**: adds a "all" dependency of this set to the current derivator, does nothing if target is not tracked or if no derivator is currently running
+             */
+            use(target: Set<unknown>): void;
+            readonly prototype: Set<any>;
+        };
+        /** **Summary**: a promise that is tracked, its resolution and rejection can be noticed by derivations that use it
+         *
+         * you can inherit from this to allow your custom promise classes to be created already tracked (custom classes are not tracked by default, see {@link State.track})
+         *
+         * you can use `instanceof State.Promise` to test if an object is tracked, `instanceof State.Object` also returns true for tracked promises
+         *
+         * **Reference**: creates a new promise with the correct prototype
+         */
+        Promise: {
+            new <T>(executor: (resolve: (value: T | PromiseLike<T>) => void, reject: (reason?: any) => void) => void): Promise<T>;
+            /** **Summary**: use the entire promise, the current derivator will rerun if the promise resolves or rejects
+             *
+             * this has no real performance improvements over depending on resolution and rejection separately, this function is added mostly for completeness, although it does add tracking, but it should not be depended upon for this
+             *
+             * **Reference**: adds a dependency of the resolution and rejection of this promise to the current derivator, if target is not tracked then it adds tracking before adding the dependencies, does nothing if the promise is known to be resolved or if no derivator is currently running
+             */
+            use(target: Promise<unknown>): void;
+            readonly prototype: Promise<any>;
+            /** does the same as `Promise.all`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+            all<T>(values: Iterable<T | PromiseLike<T>>): Promise<Awaited<T>[]>;
+            /** does the same as `Promise.race`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+            race<T>(values: Iterable<T | PromiseLike<T>>): Promise<Awaited<T>>;
+            /** does the same as `Promise.all`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+            all<T extends readonly unknown[] | []>(values: T): Promise<{ -readonly [P in keyof T]: Awaited<T[P]>; }>;
+            /** does the same as `Promise.race`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+            race<T extends readonly unknown[] | []>(values: T): Promise<Awaited<T[number]>>;
+            /** does the same as `Promise.reject`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+            reject<T = never>(reason?: any): Promise<T>;
+            /** does the same as `Promise.resolve`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+            resolve(): Promise<void>;
+            /** does the same as `Promise.resolve`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+            resolve<T>(value: T): Promise<Awaited<T>>;
+            /** does the same as `Promise.resolve`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+            resolve<T>(value: T | PromiseLike<T>): Promise<Awaited<T>>;
+            /** does the same as `Promise.allSettled`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+            allSettled<T extends readonly unknown[] | []>(values: T): Promise<{ -readonly [P in keyof T]: PromiseSettledResult<Awaited<T[P]>>; }>;
+            /** does the same as `Promise.allSettled`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+            allSettled<T>(values: Iterable<T | PromiseLike<T>>): Promise<PromiseSettledResult<Awaited<T>>[]>;
+            /** does the same as `Promise.any`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+            any<T extends readonly unknown[] | []>(values: T): Promise<Awaited<T[number]>>;
+            /** does the same as `Promise.any`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+            any<T>(values: Iterable<T | PromiseLike<T>>): Promise<Awaited<T>>;
+            /** does the same as `Promise.withResolvers`, but the created promise is tracked, so the `$` methods and properties are immediatly correct */
+            withResolvers<T>(): {
+                promise: Promise<T>;
+                resolve: (value: T | PromiseLike<T>) => void;
+                reject: (reason?: any) => void;
+            };
+        };
+    }
     type Object = globalThis.Object;
     type Array<T> = globalThis.Array<T>;
     type Map<K, V> = globalThis.Map<K, V>;
@@ -726,31 +729,34 @@ export interface Effect {
     /** the name specified when creating this object */
     readonly name: string;
 }
-export const Effect: {
-    new(affected: WeakKey, affector: (effect: Effect) => void): Effect;
-    new(...args: [WeakKey, ...WeakKey[], (effect: Effect) => void]): Effect;
-    new(name: string, affected: WeakKey, affector: (effect: Effect) => void): Effect;
-    new(name: string, ...args: [WeakKey, ...WeakKey[], (effect: Effect) => void]): Effect;
-    prototype: Effect;
-
-    /** **Summary**: creates an affector that may affect anything, not calling clear on this **is** a memory leak
-     *
-     * see the constructor for more information
-     */
-    Persistent: {
-        new(affector: (effect: Effect) => void): Effect;
-        new(name: string, affector: (effect: Effect) => void): Effect;
-    };
-
-    /** **Summary**: creates an affector that may be garbage collected, making it your responsibility to ensure it does not get garbage collected
-     *
-     * see the constructor for more information
-     */
-    Weak: {
-        new(affector: (effect: Effect) => void): Effect;
-        new(name: string, affector: (effect: Effect) => void): Effect;
-    };
-};
+export const Effect: Effect.Constructor;
+export namespace Effect {
+    interface Constructor {
+        new(affected: WeakKey, affector: (effect: Effect) => void): Effect;
+        new(...args: [WeakKey, ...WeakKey[], (effect: Effect) => void]): Effect;
+        new(name: string, affected: WeakKey, affector: (effect: Effect) => void): Effect;
+        new(name: string, ...args: [WeakKey, ...WeakKey[], (effect: Effect) => void]): Effect;
+        prototype: Effect;
+    
+        /** **Summary**: creates an affector that may affect anything, not calling clear on this **is** a memory leak
+         *
+         * see the constructor for more information
+         */
+        Persistent: {
+            new(affector: (effect: Effect) => void): Effect;
+            new(name: string, affector: (effect: Effect) => void): Effect;
+        };
+    
+        /** **Summary**: creates an affector that may be garbage collected, making it your responsibility to ensure it does not get garbage collected
+         *
+         * see the constructor for more information
+         */
+        Weak: {
+            new(affector: (effect: Effect) => void): Effect;
+            new(name: string, affector: (effect: Effect) => void): Effect;
+        };
+    }
+}
 
 /** **Summary**: a function that when called, calls all the handlers
  *
@@ -767,19 +773,20 @@ export const Effect: {
  * the function succeeds if all handlers succeed, if one or more of them fail, the errors are collected into an aggregate error and thrown
  */
 export interface Signal<in out T extends any[]> extends Signal.Sender<T>, Signal.Receiver<T> {}
-export const Signal: {
-    new <T extends any[] = []>(): Signal<T>;
-    prototype: Signal<any[]>;
-
-    /** **Summary**: the `/dev/null` of signals, you can add handlers to this and then call it, but nothing will happen
-     *
-     * suitable as a default value for signals
-     *
-     * only this instance of this kind of object exists, to test if a signal is null just compare it with this object
-     */
-    null: Signal<any>;
-};
+export const Signal: Signal.Constructor;
 export namespace Signal {
+    interface Constructor {
+        new <T extends any[] = []>(): Signal<T>;
+        prototype: Signal<any[]>;
+    
+        /** **Summary**: the `/dev/null` of signals, you can add handlers to this and then call it, but nothing will happen
+         *
+         * suitable as a default value for signals
+         *
+         * only this instance of this kind of object exists, to test if a signal is null just compare it with this object
+         */
+        null: Signal<any>;
+    }
     /** **Summary**: the sender half of a signal, which means just the signature of a function, is contravariant to T */
     interface Sender<in T extends any[]> {
         (...args: T): void;
