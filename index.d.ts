@@ -120,7 +120,7 @@ export namespace Derived {
         new <T>(derivator: () => T): Derived<Derived.Use<T>>;
         new <T>(name: string, derivator: () => T): Derived<Derived.Use<T>>;
         prototype: Derived<any>,
-    
+
         /** **Summary**: runs a block of code without creating dependencies
          *
          * this is useful when you have a block of code somewhere that tracks dependencies such as inside an affector
@@ -128,7 +128,7 @@ export namespace Derived {
          * but that code is only meant to run in response to something and therefore not actually meant to create the dependencies
          */
         now<T>(derivator: () => T): Derived.Use<T>;
-    
+
         /** **Summary**: turns values that may or may not be wrapped in Derived into always wrapped in Derived
          *
          * useful to work with `T | Derived<T>` or `Derived.Or<T>` types
@@ -136,7 +136,7 @@ export namespace Derived {
          * **Reference**: if you pass an instance of `Derived`, return it, otherwise, wrap it in a `Derived` that will never change
          */
         from<T>(value: T): Derived<Derived.Use<T>>;
-    
+
         /** **Summary**: turns values that may or may not be wrapped in Derived into always plain values
          *
          * useful to work with `T | Derived<T>` or `Derived.Or<T>` types
@@ -144,7 +144,7 @@ export namespace Derived {
          * **Reference**: while value is an instance of `Derived`, calls it, then returns value
          */
         use<T>(value: T): Derived.Use<T>;
-    
+
         /** **Summary**: creates a derived that gives a view into a property of an object
          *
          * useful for passing a property where a derived is expected
@@ -153,7 +153,7 @@ export namespace Derived {
          */
         prop<T extends object, K extends keyof T>(target: T, key: K): Derived<Derived.Use<T[K]>>;
         prop<T extends object, K extends keyof T>(name: string, target: T, key: K): Derived<Derived.Use<T[K]>>;
-    
+
         /** **Summary**: creates a derived without memoization
          *
          * as the name suggests this is for times when the derivator is cheap to run, and memoization would just be wasting time and memory
@@ -170,7 +170,7 @@ export namespace Derived {
          */
         cheap<T>(derivator: () => T): Derived<Derived.Use<T>>;
         cheap<T>(name: string, derivator: () => T): Derived<Derived.Use<T>>;
-    
+
         /** **Summary**: A derived array is an array where its values are not stored in the array but rather somewhere else
          *
          * when the values of a derived are read, it runs code to derive it from somewhere else, possibly with memoization, no state (other than caching) is stored on derived arrays
@@ -204,7 +204,7 @@ export namespace Derived {
              */
             proxy<T, H extends Derived.Array.ProxyHandlerWithoutSymbol<T>>(target: T, handler: H): Exclude<ReturnType<H["item"]>, typeof Derived.Array.empty>[];
             proxy<T, H extends Derived.Array.ProxyHandler<T>>(target: T, handler: H): Exclude<ReturnType<H["item"]>, typeof Derived.Array.empty>[];
-    
+
             /** **Summary**: creates a derived array from a range from 0 up to the specified length exclusive, optionally transformed with a function first, and with the length possibly being derived from somewhere else
              *
              * this allows you to do the equivalent of a for loop in derivations
@@ -215,7 +215,7 @@ export namespace Derived {
              */
             range<T>(length: Derived.Or<number>, fn: (index: number) => T): Derived.Use<T>[];
             range(length: Derived.Or<number>): number[];
-    
+
             /** **Summary**: A symbol that represents the absence of an array item, expected to be returned on the `Derived.Array.ProxyHandler.item` when getting items past the array's end or at holes (sparse arrays) */
             readonly empty: unique symbol;
         };
@@ -252,16 +252,16 @@ export namespace Derived {
             /** returns true if the date is in the future, if it is in the future and this method is executed inside a derivation, the derivation will be invalidated when this date passes */
             isFuture(value: number | string | Date): boolean;
         };
-    
+
         /** set this property to a function to log when any `WeakRef` created by rubedo is garbage collected */
         debugLogWeakRefCleanUp: ((message: string) => void) | null;
-    
+
         /** what to do when a derivation or state is used outside a derivation, default is `allow`
          *
          * uses inside of `Derived.now` and calls to the `now` method are always allowed, even though they avoid creating dependencies
          */
         onUseDerivedOutsideOfDerivation: "allow" | "throw" | ((message: string) => void);
-    
+
         /** what to do when a tracked object is used outside a derivation, default is `allow`
          *
          * uses inside of `Derived.now` are always allowed, even though they avoid creating dependencies
@@ -373,7 +373,7 @@ export namespace State {
         new <T>(value: T): State<T>;
         new <T>(name: string, value: T): State<T>;
         prototype: State<any>;
-    
+
         /** **Summary**: adds tracking to an object so rubedo can notice when it is read and written to
          *
          * rubedo can create dependency trees and update graphs without a compiler, but without a dedicated compilation step, it may need to give it a hand so it can do its job
@@ -415,7 +415,7 @@ export namespace State {
          * returns the value passed in, never throws errors
          */
         track<T>(value: T): T;
-    
+
         /** **Summary**: like `Object.freeze` but tracks items before freezing, allowing the object to be memoized
          *
          * this is useful to create "records" also known as "data objects", while also tracking the values inside
@@ -435,7 +435,7 @@ export namespace State {
          * returns the same object passed in, does not wrap it in a proxy
          */
         freeze<T>(value: T): Readonly<T>;
-    
+
         /** **Summary**: like `Object.is`, but uses structural equality for frozen objects
          *
          * this function is used internally to determine if dependant derivations should be invalidated
@@ -451,7 +451,7 @@ export namespace State {
          * never throws, exceptions thrown in traps of the objects being compared are caught and discarded, when this happens this function returns false
          */
         is(a: any, b: any): boolean;
-    
+
         /** **Summary**: creates a state that gives a view into a property of an object
          *
          * sometimes you want to pass a property "by reference", giving someone a state that refers to that property
@@ -480,7 +480,7 @@ export namespace State {
          */
         prop<T extends object, K extends keyof T>(target: T, key: K): State<T[K]>;
         prop<T extends object, K extends keyof T>(name: string, target: T, key: K): State<T[K]>;
-    
+
         /** **Summary**: create a proxy state, that gives you full control over how the value is read and written
          *
          * no caching is ever done, every access to it calls the getter, calls to the set method call the setter, calls to the mut method call the getter and then the setter
@@ -491,7 +491,7 @@ export namespace State {
          */
         proxy<T>(getter: () => T, setter: (value: T) => void): State<T>;
         proxy<T>(name: string, getter: () => T, setter: (value: T) => void): State<T>;
-    
+
         /** **Summary**: an object that is tracked, changes to it can be noticed by derivations that use it
          *
          * you can inherit from this to allow your custom classes to have their properties tracked (custom classes are not tracked by default, see {@link State.track})
@@ -689,7 +689,7 @@ export namespace State {
  *     node.nodeValue = text();
  * });
  * ```
- * 
+
  * another example, if you intend to log something to the console, and thus you want the affect to last forever, you could pass `console.log` or `console` as the affected, these would cause the effect to live forever
  *
  * ```
@@ -785,7 +785,7 @@ export namespace Effect {
         new(name: string, affected: WeakKey, affector: (effect: Effect) => void): Effect;
         new(name: string, ...args: [WeakKey, ...WeakKey[], (effect: Effect) => void]): Effect;
         prototype: Effect;
-    
+
         /** **Summary**: creates an affector that may affect anything, not calling clear on this **is** a memory leak
          *
          * see the constructor for more information
@@ -794,7 +794,7 @@ export namespace Effect {
             new(affector: (effect: Effect) => void): Effect;
             new(name: string, affector: (effect: Effect) => void): Effect;
         };
-    
+
         /** **Summary**: creates an affector that may be garbage collected, making it your responsibility to ensure it does not get garbage collected
          *
          * see the constructor for more information
@@ -826,7 +826,7 @@ export namespace Signal {
     interface Constructor {
         new <T extends any[] = []>(): Signal<T>;
         prototype: Signal<any[]>;
-    
+
         /** **Summary**: the `/dev/null` of signals, you can add handlers to this and then call it, but nothing will happen
          *
          * suitable as a default value for signals

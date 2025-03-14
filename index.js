@@ -973,8 +973,6 @@ function invalidateDerivationList(arr) {
 /**
  * @template T
  * @template P
- * @param {T} target 
- * @param {P} properties 
  * @returns {T & P}
  */
 function defineProperties(target, properties) {
@@ -1324,9 +1322,9 @@ function mutationOnDerivedArray() {
 
 /**
  * @template T
- * @param {T} target 
- * @param {import(".").Derived.Array.ProxyHandler<T, any>} handler 
- * @returns 
+
+
+
  */
 function createDerivedArray(target, handler) {
     const target2 = [];
