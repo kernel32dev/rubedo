@@ -950,7 +950,8 @@ function invalidateDerivationSet(set) {
     if (!set || !set.size) return;
     const src = Array.from(set);
     set.clear();
-    for (let i = 0; i < src.length; i++) {
+    const length = src.length;
+    for (let i = 0; i < length; i++) {
         const derived = src[i].deref();
         /* istanbul ignore next */
         if (derived && derived[sym_weak] === src[i]) {
@@ -960,9 +961,9 @@ function invalidateDerivationSet(set) {
 }
 /** @param {Set<WeakRef<Derived>>[]} arr */
 function invalidateDerivationList(arr) {
-    for (let i = 0; i < arr.length; i++) {
-        const set = arr[i];
-        invalidateDerivationSet(set);
+    const length = arr.length;
+    for (let i = 0; i < length; i++) {
+        invalidateDerivationSet(arr[i]);
     }
 }
 
@@ -1694,12 +1695,7 @@ defineProperties(DerivedDate, {
     },
     clock(precision, timezone, frame) {
         if (!arguments.length) {
-            try {
-                void requestAnimationFrame;
-                return clocks.lrse;
-            } catch {
-                return clocks.lise;
-            }
+            return typeof globalThis.requestAnimationFrame == "function" ? clocks.lrse : clocks.lise;
         }
         switch (precision) {
             default:
@@ -1728,11 +1724,11 @@ defineProperties(DerivedDate, {
                 throw new TypeError('expected frame parameter to be one either "respect frame" or "ignore frame", got "' + frame + '"');
             case undefined:
             case "respect frame":
-                try {
-                    void requestAnimationFrame;
+                if (typeof globalThis.requestAnimationFrame == "function") {
                     frame = "r";
-                } catch {
-                    if (frame) throw new Error("Cannot create a clock that respects the frame because requestAnimationFrame is not available");
+                } else if (frame) {
+                    throw new Error("Cannot create a clock that respects the frame because requestAnimationFrame is not available");
+                } else {
                     frame = "i";
                 }
                 break;
@@ -1758,7 +1754,7 @@ defineProperties(DerivedDate, {
 
 /** @type {Record<string, Date>} */
 const clocks = function () {
-    // TODO! use requestAnimationFrame
+    // TODO! optimize frame respecting millisecond event to a single requestAnimationFrame call
     const millisecond_ders = new Set();
     const second_ders = new Set();
     const minute_ders = new Set();
@@ -1766,6 +1762,14 @@ const clocks = function () {
     const utc_hour_ders = new Set();
     const local_day_ders = new Set();
     const utc_day_ders = new Set();
+
+    const frame_millisecond_ders = new Set();
+    const frame_second_ders = new Set();
+    const frame_minute_ders = new Set();
+    const frame_local_hour_ders = new Set();
+    const frame_utc_hour_ders = new Set();
+    const frame_local_day_ders = new Set();
+    const frame_utc_day_ders = new Set();
 
     const second_ms = 1000;
     const minute_ms = second_ms * 60;
@@ -1796,33 +1800,38 @@ const clocks = function () {
 
     const schedule_timeout_microtask = () => {
         const delay = timeout_until - Date.now();
-        // console.log("delay: " + delay);
+        console.log("delay: " + delay);
         timeout = setTimeout(timeout_handler, delay < 0 ? 0 : delay);
     };
 
     const timeout_handler = () => {
-        // console.log("time: " + new Date().toLocaleTimeString() + "." + new Date().getMilliseconds().toString().padStart(3, "0"));
+        console.log("time: " + new Date().toLocaleTimeString() + "." + new Date().getMilliseconds().toString().padStart(3, "0"));
         timeout = 0;
         timeout_until = 0;
         let my_timeout_until = 0;
         let now;
-        if (local_day_ders.size || local_hour_ders.size) {
+        const frame_ders = [];
+        if (frame_local_day_ders.size || frame_local_hour_ders.size || local_day_ders.size || local_hour_ders.size) {
             const date = new Date();
             now = date.getTime();
             const new_local_hour_past = date.setHours(date.getHours(), 0, 0, 0);
             const new_local_day_past = date.setHours(0, 0, 0, 0);
-            if (local_hour_ders.size) {
+            if (frame_local_hour_ders.size || local_hour_ders.size) {
                 if (local_hour_past != new_local_hour_past) {
                     local_hour_past = 0;
                     invalidateDerivationSet(local_hour_ders);
+                    frame_ders.push(...frame_local_hour_ders);
+                    frame_local_hour_ders.clear();
                 } else if (!my_timeout_until || my_timeout_until > new_local_hour_past + hour_ms) {
                     my_timeout_until = new_local_hour_past + hour_ms;
                 }
             }
-            if (local_day_ders.size) {
+            if (frame_local_day_ders.size || local_day_ders.size) {
                 if (local_day_past != new_local_day_past) {
                     local_day_past = 0;
                     invalidateDerivationSet(local_day_ders);
+                    frame_ders.push(...frame_local_day_ders);
+                    frame_local_day_ders.clear();
                 } else if (!my_timeout_until || my_timeout_until > new_local_day_past + day_ms) {
                     my_timeout_until = new_local_day_past + day_ms;
                 }
@@ -1834,112 +1843,132 @@ const clocks = function () {
         const new_utc_hour_past = now - now % hour_ms;
         const new_minute_past = now - now % minute_ms;
         const new_second_past = now - now % second_ms;
-        if (utc_day_ders.size) {
+        if (frame_utc_day_ders.size || utc_day_ders.size) {
             if (utc_day_past != new_utc_day_past) {
                 utc_day_past = 0;
                 invalidateDerivationSet(utc_day_ders);
+                frame_ders.push(...frame_utc_day_ders);
+                frame_utc_day_ders.clear();
             } else if (!my_timeout_until || my_timeout_until > new_utc_day_past + day_ms) {
                 my_timeout_until = new_utc_day_past + day_ms;
             }
         }
-        if (utc_hour_ders.size) {
+        if (frame_utc_hour_ders.size || utc_hour_ders.size) {
             if (utc_hour_past != new_utc_hour_past) {
                 utc_hour_past = 0;
                 invalidateDerivationSet(utc_hour_ders);
+                frame_ders.push(...frame_utc_hour_ders);
+                frame_utc_hour_ders.clear();
             } else if (!my_timeout_until || my_timeout_until > new_utc_hour_past + hour_ms) {
                 my_timeout_until = new_utc_hour_past + hour_ms;
             }
         }
-        if (minute_ders.size) {
+        if (frame_minute_ders.size || minute_ders.size) {
             if (minute_past != new_minute_past) {
                 minute_past = 0;
                 invalidateDerivationSet(minute_ders);
+                frame_ders.push(...frame_minute_ders);
+                frame_minute_ders.clear();
             } else if (!my_timeout_until || my_timeout_until > new_minute_past + minute_ms) {
                 my_timeout_until = new_minute_past + minute_ms;
             }
         }
-        if (second_ders.size) {
+        if (frame_second_ders.size || second_ders.size) {
             if (second_past != new_second_past) {
                 second_past = 0;
                 invalidateDerivationSet(second_ders);
+                frame_ders.push(...frame_second_ders);
+                frame_second_ders.clear();
             } else if (!my_timeout_until || my_timeout_until > new_second_past + second_ms) {
                 my_timeout_until = new_second_past + second_ms;
             }
         }
         invalidateDerivationSet(millisecond_ders);
+        frame_ders.push(...millisecond_ders);
+        millisecond_ders.clear();
         if (my_timeout_until) queue_schedule_timeout_microtask(my_timeout_until);
+        if (frame_ders.length) requestAnimationFrame(() => {
+            const length = frame_ders.length;
+            for (let i = 0; i < length; i++) {
+                const derived = frame_ders[i].deref();
+                /* istanbul ignore next */
+                if (derived && derived[sym_weak] === frame_ders[i]) {
+                    invalidateDerivation(derived);
+                }
+            }
+        });
     };
 
-    const millisecond_handler = () => {
+    const millisecond_handler = ders => {
         const now = Date.now();
         if (prepareUseTracked()) {
-            millisecond_ders.add(current_derived);
+            ders.add(current_derived);
             timeout_until = 0;
             queue_schedule_timeout_microtask(now);
         }
         return now;
     };
-    const second_handler = () => {
+    const second_handler = ders => {
         const now = Date.now();
         const past = now - now % second_ms;
         const future = past + second_ms;
         if (prepareUseTracked()) {
-            second_ders.add(current_derived);
+            ders.add(current_derived);
             queue_schedule_timeout_microtask(future);
             if (!second_past) second_past = past;
         }
         return past;
     };
-    const minute_handler = () => {
+    const minute_handler = ders => {
         const now = Date.now();
         const past = now - now % minute_ms;
         const future = past + minute_ms;
         if (prepareUseTracked()) {
-            minute_ders.add(current_derived);
+            ders.add(current_derived);
             queue_schedule_timeout_microtask(future);
             if (!minute_past) minute_past = past;
         }
         return past;
     };
-    const local_hour_handler = () => {
+    const local_hour_handler = ders => {
         const date = new Date();
         const past = date.setHours(date.getHours(), 0, 0, 0);
         const future = past + hour_ms;
         if (prepareUseTracked()) {
-            local_hour_ders.add(current_derived);
+            ders.add(current_derived);
             queue_schedule_timeout_microtask(future);
             if (!local_hour_past) local_hour_past = past;
         }
         return past;
     };
-    const utc_hour_handler = () => {
+    const utc_hour_handler = ders => {
         const now = Date.now();
         const past = now - now % hour_ms;
         const future = past + hour_ms;
         if (prepareUseTracked()) {
-            utc_hour_ders.add(current_derived);
+            ders.add(current_derived);
             queue_schedule_timeout_microtask(future);
             if (!utc_hour_past) utc_hour_past = past;
         }
         return past;
     };
-    const local_day_handler = () => {
+    const local_day_handler = ders => {
         const date = new Date();
         const past = date.setHours(0, 0, 0, 0);
         const future = past + day_ms;
         if (prepareUseTracked()) {
-            local_day_ders.add(current_derived);
+            ders.add(current_derived);
             queue_schedule_timeout_microtask(future);
             if (!local_day_past) local_day_past = past;
         }
         return past;
     };
-    const utc_day_handler = () => {
+    const utc_day_handler = ders => {
         const now = Date.now();
         const past = now - now % day_ms;
         const future = past + day_ms;
         if (prepareUseTracked()) {
-            utc_day_ders.add(current_derived);
+            ders.add(current_derived);
             queue_schedule_timeout_microtask(future);
             if (!utc_day_past) utc_day_past = past;
         }
@@ -1949,26 +1978,26 @@ const clocks = function () {
     const proxy = DerivedDate.proxy;
     return {
         __proto__: null,
-        lrms: proxy(millisecond_handler),
-        lims: proxy(millisecond_handler),
-        urms: proxy(millisecond_handler),
-        uims: proxy(millisecond_handler),
-        lrse: proxy(second_handler),
-        lise: proxy(second_handler),
-        urse: proxy(second_handler),
-        uise: proxy(second_handler),
-        lrmi: proxy(minute_handler),
-        limi: proxy(minute_handler),
-        urmi: proxy(minute_handler),
-        uimi: proxy(minute_handler),
-        lrho: proxy(local_hour_handler),
-        liho: proxy(local_hour_handler),
-        urho: proxy(utc_hour_handler),
-        uiho: proxy(utc_hour_handler),
-        lrda: proxy(local_day_handler),
-        lida: proxy(local_day_handler),
-        urda: proxy(utc_day_handler),
-        uida: proxy(utc_day_handler),
+        lrms: proxy(millisecond_handler.bind(null, frame_millisecond_ders)),
+        lims: proxy(millisecond_handler.bind(null, millisecond_ders)),
+        urms: proxy(millisecond_handler.bind(null, frame_millisecond_ders)),
+        uims: proxy(millisecond_handler.bind(null, millisecond_ders)),
+        lrse: proxy(second_handler.bind(null, frame_second_ders)),
+        lise: proxy(second_handler.bind(null, second_ders)),
+        urse: proxy(second_handler.bind(null, frame_second_ders)),
+        uise: proxy(second_handler.bind(null, second_ders)),
+        lrmi: proxy(minute_handler.bind(null, frame_minute_ders)),
+        limi: proxy(minute_handler.bind(null, minute_ders)),
+        urmi: proxy(minute_handler.bind(null, frame_minute_ders)),
+        uimi: proxy(minute_handler.bind(null, minute_ders)),
+        lrho: proxy(local_hour_handler.bind(null, frame_local_hour_ders)),
+        liho: proxy(local_hour_handler.bind(null, local_hour_ders)),
+        urho: proxy(utc_hour_handler.bind(null, frame_utc_hour_ders)),
+        uiho: proxy(utc_hour_handler.bind(null, utc_hour_ders)),
+        lrda: proxy(local_day_handler.bind(null, frame_local_day_ders)),
+        lida: proxy(local_day_handler.bind(null, local_day_ders)),
+        urda: proxy(utc_day_handler.bind(null, frame_utc_day_ders)),
+        uida: proxy(utc_day_handler.bind(null, utc_day_ders)),
     };
 }();
 
