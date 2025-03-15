@@ -2043,7 +2043,7 @@ function invalidateThen(time) {
 function invalidateThenTimeoutHandler() {
     invalidate_then_timeout = 0;
     invalidate_then_timeout_until = 0;
-    if (invalidate_then_jobs.length) return;
+    if (!invalidate_then_jobs.length) return;
     let now = Date.now();
     do {
         const last = invalidate_then_jobs[invalidate_then_jobs.length - 1];
