@@ -1802,12 +1802,12 @@ const clocks = function () {
 
     const schedule_timeout_microtask = () => {
         const delay = timeout_until - Date.now();
-        console.log("delay: " + delay);
+        // console.log("delay: " + delay);
         timeout = setTimeout(timeout_handler, delay < 0 ? 0 : delay);
     };
 
     const timeout_handler = () => {
-        console.log("time: " + new Date().toLocaleTimeString() + "." + new Date().getMilliseconds().toString().padStart(3, "0"));
+        // console.log("time: " + new Date().toLocaleTimeString() + "." + new Date().getMilliseconds().toString().padStart(3, "0"));
         timeout = 0;
         timeout_until = 0;
         let my_timeout_until = 0;
