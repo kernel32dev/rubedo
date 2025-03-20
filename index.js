@@ -17,6 +17,8 @@
  *
  * on `StateArray` this is always a `(Set<WeakRef<Derived>> | <empty>)[]` (each item represents the corresponding item in the real array by index, (shifting will invalidate later slots))
  *
+ * on `StateMap` and `StateSet` this is always a `Map<any, Set<WeakRef<Derived>>>`
+ *
  * the value is `WeakRef<Derived>` and if it matches `.deref()[sym_weak]` that means the derivation is still active
  *
  * if it does not match, this weakref can be discarded, since it was from an outdated derivation */
@@ -2894,15 +2896,13 @@ Object.defineProperty(StateMapPrototype, "size", {
 
 function StateMap(iterable) {
     if (!new.target) throw new TypeError("Constructor StateMap requires 'new'");
-    if (iterable != null && iterable != undefined) {
-        const value = new Map(iterable);
-        Object.setPrototypeOf(value, new.target.prototype);
-        Object.defineProperty(value, sym_ders, { value: new Map() });
-        Object.defineProperty(value, sym_len, { value: new Set() });
-        Object.defineProperty(value, sym_all, { value: new Set() });
-        Object.defineProperty(value, sym_tracked, { value });
-        return value;
-    }
+    const value = new Map(iterable);
+    Object.setPrototypeOf(value, new.target.prototype);
+    Object.defineProperty(value, sym_ders, { value: new Map() });
+    Object.defineProperty(value, sym_len, { value: new Set() });
+    Object.defineProperty(value, sym_all, { value: new Set() });
+    Object.defineProperty(value, sym_tracked, { value });
+    return value;
 }
 
 StateMap.prototype = StateMapPrototype;
@@ -3011,14 +3011,12 @@ Object.defineProperty(StateSetPrototype, "size", {
 
 function StateSet(iterable) {
     if (!new.target) throw new TypeError("Constructor StateSet requires 'new'");
-    if (iterable != null && iterable != undefined) {
-        const value = new Set(iterable);
-        Object.setPrototypeOf(value, new.target.prototype);
-        Object.defineProperty(value, sym_ders, { value: new Set() });
-        Object.defineProperty(value, sym_all, { value: new Set() });
-        Object.defineProperty(value, sym_tracked, { value });
-        return value;
-    }
+    const value = new Set(iterable);
+    Object.setPrototypeOf(value, new.target.prototype);
+    Object.defineProperty(value, sym_ders, { value: new Map() });
+    Object.defineProperty(value, sym_all, { value: new Set() });
+    Object.defineProperty(value, sym_tracked, { value });
+    return value;
 }
 
 StateSet.prototype = StateSetPrototype;
