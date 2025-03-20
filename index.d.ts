@@ -242,8 +242,8 @@ export namespace Derived {
             * the default precision is second, the default timezone is local, and by default frames are respected if `requestAnimationFrame` is available
             */
             clock(
-                precision?: "ms" | "second" | "minute" | "hour" | "day" = "sec",
-                timezone?: "local" | "utc" = "local",
+                precision?: "ms" | "second" | "minute" | "hour" | "day",
+                timezone?: "local" | "utc",
                 frame?: "respect frame" | "ignore frame",
             ): Date;
 
