@@ -252,10 +252,11 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
         }
     },
     derive(derivator) {
+        if (typeof derivator !== "function") throw new TypeError("argument is not a function");
         const derived = this;
-        return new Derived(function derive() {
+        return new Derived({[derivator.name]() {
             return derivator(derived());
-        });
+        }}[derivator.name]);
     },
     prop(key) {
         const derived = this;
@@ -289,11 +290,12 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
         });
     },
     fmap(fmap) {
+        if (typeof fmap !== "function") throw new TypeError("argument is not a function");
         const derived = this;
-        return new Derived(function fmap() {
+        return new Derived({[fmap.name]() {
             const value = derived();
             return value === null || value === undefined ? value : fmap(value);
-        });
+        }}[fmap.name]);
     },
     valueOf() {
         const value = this();
