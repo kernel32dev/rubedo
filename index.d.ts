@@ -231,7 +231,7 @@ export namespace Derived {
             *
             * you can specify the precision of the date, time information less than the precision requested will be truncated to zero
             *
-            * timezone specifies from what timezone to get the time, this is relevant for lower precisions such as hour and day, where the timezones affect where the day and hour boundaries are
+            * timezone specifies from what timezone to get the time, this is relevant only for hour and day precisions, where the timezones affect where the day and hour boundaries are
             *
             * the only timezones supported are local and utc
             *
