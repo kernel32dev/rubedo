@@ -284,7 +284,51 @@ describe("Derivation memoized (possibly invalidated mechanism)", () => {
         expect(mock2).toHaveBeenCalledTimes(3);
         expect(affects).toEqual([true, false]);
     });
+    test("Derivator should not rerun if only the returned derivation was invalidated (derived returning state)", () => {
+        const state = new State({});
+        const mock = jest.fn(() => state);
+        const derived = new Derived(mock);
+        expect(mock).toHaveBeenCalledTimes(0);
+        expect(derived()).toBe(state());
+        expect(mock).toHaveBeenCalledTimes(1);
+        expect(derived()).toBe(state());
+        expect(mock).toHaveBeenCalledTimes(1);
+        state.set({});
+        expect(mock).toHaveBeenCalledTimes(1);
+        expect(derived()).toBe(state());
+        expect(mock).toHaveBeenCalledTimes(1);
+    });
+    test("Derivator should not rerun if only the returned derivation was invalidated (derived returning derived returning state)", () => {
+        const state1 = new State({});
+        const mock1 = jest.fn(() => state1);
+        const derived1 = new Derived(mock1);
+        const state2 = new State({});
+        const mock2 = jest.fn(() => {
+            state2();
+            return derived1;
+        });
+        const derived2 = new Derived(mock2);
+        expect(mock1).toHaveBeenCalledTimes(0);
+        expect(mock2).toHaveBeenCalledTimes(0);
+        expect(derived1()).toBe(state1());
+        expect(mock1).toHaveBeenCalledTimes(1);
+        expect(mock2).toHaveBeenCalledTimes(0);
+        expect(derived1()).toBe(state1());
+        expect(derived2()).toBe(state1());
+        expect(mock1).toHaveBeenCalledTimes(1);
+        expect(mock2).toHaveBeenCalledTimes(1);
+        state1.set({});
+        expect(mock1).toHaveBeenCalledTimes(1);
+        expect(mock2).toHaveBeenCalledTimes(1);
+        state2.set({});
+        expect(mock1).toHaveBeenCalledTimes(1);
+        expect(mock2).toHaveBeenCalledTimes(1);
+        expect(derived2()).toBe(state1());
+        expect(mock1).toHaveBeenCalledTimes(1);
+        expect(mock2).toHaveBeenCalledTimes(2);
+    });
 });
+
 
 describe("special State objects", () => {
     describe("State.prop", () => {

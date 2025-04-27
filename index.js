@@ -395,7 +395,11 @@ function Derived(name, derivator) {
     const derived = ({
         [name]() {
             // derivator is set to null after the derivator executes without creating dependencies
-            if (!derivator) return derived[sym_value];
+            if (!derivator) {
+                let value = derived[sym_value];
+                while (value instanceof Derived) value = value();
+                return value;
+            }
 
             // add the current derivator as a derivation of myself
             if (current_derived) {
@@ -419,27 +423,38 @@ function Derived(name, derivator) {
                 // TODO! since recreating the sym_ders link is only needed when revalidating due to an affect (not lazy), do this only when one is involved
                 // (referring to the second argument of the call below)
                 if (!possibleInvalidationIsInvalidated(pideps, old_weak)) {
-                    return derived[sym_value];
+                    let value = derived[sym_value];
+                    while (value instanceof Derived) {
+                        value = value();
+                        // TODO! maybe its necessary to recheck derived[sym_weak] or derived[sym_pideps] now that user code executed
+                    }
+                    return value;
                 }
                 pideps.clear();
             }
             const new_weak = new WeakRef(derived);
             const old_derived = current_derived;
             const old_derived_used = current_derived_used;
-            current_derived = new_weak;
+            // current_derived = new_weak;
             const old_value = derived[sym_value];
             try {
                 delete derived[sym_value];
                 for (let i = 0; i < maximumDerivedRepeats; i++) {
                     derived[sym_weak] = new_weak;
+                    current_derived = new_weak;
                     current_derived_used = false;
-                    let value = track(derivator());
+                    const original_value = track(derivator());
+                    let value = original_value;
+                    
+                    const my_current_derived_used = current_derived_used;
+                    current_derived = old_derived;
                     while (derived[sym_weak] && value instanceof Derived) {
                         value = value();
                     }
                     if (derived[sym_weak]) {
-                        if (!current_derived_used) derivator = null;
-                        return derived[sym_value] = value;
+                        if (!my_current_derived_used) derivator = null;
+                        derived[sym_value] = original_value;
+                        return value;
                     }
                 }
                 throw new RangeError("Too many recursive derivation invalidations");
