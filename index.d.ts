@@ -860,6 +860,16 @@ export namespace Effect {
             new(affector: (effect: Effect) => void): Effect;
             new(name: string, affector: (effect: Effect) => void): Effect;
         };
+
+        /** **Summary**: schedules a microtask, but errors thrown inside the callback or promise have the stack that called queueMicrotask appended to them
+         *
+         * this is very useful to know what triggered a task that crashed
+         *
+         * rubedo internally uses this to schedule effects, resulting in much more helpful error messages
+         *
+         * callback can be a syncronous function, an asyncronous function or a promise,
+         */
+        queue(callback: (() => void | Promise<void>) | Promise<void>): void;
     }
 }
 
@@ -1064,5 +1074,20 @@ declare global {
          * the `$` indicates this is a property added by rubedo
          */
         $isFuture(): boolean;
+    }
+    interface ErrorConstructor {
+        /** **Summary**: get the current stack trace
+         *
+         * the frames returned start at the function that called $stack, so if 0 frames are ommited the caller of $stack is included
+         *
+         * if the stack could not be obtained, undefined is returned
+         *
+         * if this is called from inside the callback to {@link Effect.queue} the stack trace that called the queue is also returned
+         *
+         * this is different from `Error().stack`
+         * 
+         * the `$` indicates this is a property added by rubedo
+         */
+        $stack(omitFrames: number): string | undefined;
     }
 }

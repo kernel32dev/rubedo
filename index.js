@@ -237,6 +237,8 @@ let remainingFrozenComparisonsDepth = maximumFrozenComparisonsDepth;
  */
 const recursiveFrozenComparisonGuard = new WeakSet();
 
+let current_scheduler_stack = "";
+
 /** @type {(func: any, args: [any, ...any[]]) => any} */
 const apply = Function.prototype.apply.bind(Function.prototype.apply);
 
@@ -259,16 +261,20 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
     derive(derivator) {
         if (typeof derivator !== "function") throw new TypeError("argument is not a function");
         const derived = this;
-        return new Derived({[derivator.name]() {
-            return derivator(derived());
-        }}[derivator.name]);
+        return new Derived({
+            [derivator.name]() {
+                return derivator(derived());
+            }
+        }[derivator.name]);
     },
     cheap(derivator) {
         if (typeof derivator !== "function") throw new TypeError("argument is not a function");
         const derived = this;
-        return Derived.cheap({[derivator.name]() {
-            return derivator(derived());
-        }}[derivator.name]);
+        return Derived.cheap({
+            [derivator.name]() {
+                return derivator(derived());
+            }
+        }[derivator.name]);
     },
     prop(key) {
         const derived = this;
@@ -323,24 +329,24 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
         const derived = this;
         return new Derived(
             value instanceof Derived
-            ? function eq() {
-                return is(derived(), value());
-            }
-            : function eq() {
-                return is(derived(), value);
-            }
+                ? function eq() {
+                    return is(derived(), value());
+                }
+                : function eq() {
+                    return is(derived(), value);
+                }
         );
     },
     neq(value) {
         const derived = this;
         return new Derived(
             value instanceof Derived
-            ? function neq() {
-                return !is(derived(), value());
-            }
-            : function neq() {
-                return !is(derived(), value);
-            }
+                ? function neq() {
+                    return !is(derived(), value());
+                }
+                : function neq() {
+                    return !is(derived(), value);
+                }
         );
     },
     not() {
@@ -371,10 +377,12 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
     fmap(fmap) {
         if (typeof fmap !== "function") throw new TypeError("argument is not a function");
         const derived = this;
-        return new Derived({[fmap.name]() {
-            const value = derived();
-            return value === null || value === undefined ? value : fmap(value);
-        }}[fmap.name]);
+        return new Derived({
+            [fmap.name]() {
+                const value = derived();
+                return value === null || value === undefined ? value : fmap(value);
+            }
+        }[fmap.name]);
     },
     resolved() {
         const derived = this;
@@ -558,7 +566,7 @@ function Derived(name, derivator) {
                     current_derived_used = false;
                     const original_value = track(derivator());
                     let value = original_value;
-                    
+
                     const my_current_derived_used = current_derived_used;
                     current_derived = old_derived;
                     while (derived[sym_weak] && value instanceof Derived) {
@@ -675,8 +683,10 @@ Object.defineProperty(Derived, "debugLogWeakRefCleanUp", {
             });
             WeakRef = function DebugWeakRef(target) {
                 const ref = new NativeWeakRef(target);
-                debugRegistry.register(target, Error("cleanup (type: " + typeof target + ") (name: " + target.name + ")").stack);
-                //debugRegistry.register(ref, Error("cleanup (ref)").stack);
+                const e = Error("cleanup (type: " + typeof target + ") (name: " + target.name + ")");
+                // const e = Error("cleanup (ref)");
+                addSchedulerStack(e, current_scheduler_stack);
+                debugRegistry.register(target, e.stack);
                 return ref;
             }
         }
@@ -932,7 +942,7 @@ const AffectorPrototype = defineProperties({}, {
         const affect_task = this[sym_affect_task];
         if (affect_task !== undefined) {
             this[sym_affect_task] = false;
-            if (affect_task === null) queueMicrotask(this[sym_affect]);
+            if (affect_task === null) queue(this[sym_affect]);
         }
     },
     run() {
@@ -1000,6 +1010,7 @@ defineProperties(Effect, {
         }
         return createAffector(name, affector, new.target.prototype);
     },
+    queue,
 });
 
 Effect.prototype = AffectorPrototype;
@@ -1040,7 +1051,7 @@ function createAffector(name, affector, prototype) {
     Object.defineProperty(obj, sym_weak, { value: weak });
     Object.defineProperty(obj, sym_affect, { value: affect });
     Object.defineProperty(obj, sym_affect_task, { writable: true, value: false });
-    queueMicrotask(affect);
+    queue(affect);
     return obj;
 }
 
@@ -1107,7 +1118,7 @@ function invalidateDerivation(target, transitive) {
         const affect_task = target[sym_affect_task];
         if (affect_task === null) {
             target[sym_affect_task] = !!transitive;
-            queueMicrotask(target[sym_affect]);
+            queue(target[sym_affect]);
         } else if (affect_task === true && !transitive) {
             target[sym_affect_task] = false;
         }
@@ -3461,6 +3472,36 @@ defineProperties(Date.prototype, {
 });
 
 //#endregion
+//#region error extensions
+
+defineProperties(Error, {
+    $stack(omitFrames) {
+        if (typeof omitFrames !== "number") throw new TypeError("argument must be a number");
+        if (omitFrames < 0) throw new TypeError("argument must be non-negative");
+        omitFrames += 2; // remove the Error line and the $stack line
+        if (!Number.isSafeInteger(omitFrames)) throw new TypeError("argument must be an integer");
+
+        const e = Error();
+        console.log(e.stack);
+        addSchedulerStack(e, current_scheduler_stack);
+        console.log(e.stack);
+        let stack = e.stack;
+        if (typeof stack != "string" || !stack) return;
+
+        let position = 0;
+        for (let i = 0; i < omitFrames; i++) {
+            const nextNewline = stack.indexOf("\n", position);
+            if (nextNewline === -1) {
+                // Not enough lines, return empty string
+                return "";
+            }
+            position = nextNewline + 1; // Move past the newline
+        }
+        return "\n" + stack.slice(position);
+    },
+});
+
+//#endregion
 //#region Signal
 
 /** @typedef {(...args: any[]) => void} SignalHandler */
@@ -3620,6 +3661,64 @@ function signalAddWeakHandler(signal, args) {
     // add the strong references to the weakmap
     for (let i = 0; i < handler_index; i++) {
         weakmap.set(args[i], handler);
+    }
+}
+
+//#endregion
+
+//#region async error stack
+
+function queue(callback) {
+    let stack = Error().stack;
+    if (typeof stack == "string" && stack) {
+        const index1 = stack.indexOf("\n"); // remove "Error:" line
+        if (index1 != -1) {
+            const index2 = stack.indexOf("\n", index1 + 1); // remove queueMicrotask2 call
+            stack = stack.slice(index2 != -1 ? index2 : index1);
+        }
+        if (current_scheduler_stack) {
+            const index = stack.lastIndexOf("\n", stack.length - 1); // remove callback call (we know it exists because current_scheduler_stack is set)
+            if (index != -1) stack = stack.slice(0, index);
+            stack += current_scheduler_stack;
+        }
+    } else {
+        stack = "";
+    }
+    if (callback instanceof Promise) {
+        if (stack) callback.catch(e => {
+            addSchedulerStack(e, stack);
+            throw e;
+        });
+    } else {
+        queueMicrotask(!stack ? callback : {
+            [callback.name]() {
+                try {
+                    current_scheduler_stack = stack;
+                    const result = callback();
+                    if (result instanceof Promise) {
+                        result.catch(e => {
+                            addSchedulerStack(e, stack);
+                            throw e;
+                        });
+                    }
+                } catch (e) {
+                    addSchedulerStack(e, current_scheduler_stack);
+                    throw e;
+                } finally {
+                    current_scheduler_stack = "";
+                }
+            }
+        }[callback.name]);
+    }
+}
+
+function addSchedulerStack(e, scheduler) {
+    if (typeof e != "object" || !e || !scheduler) return;
+    let scheduled = e.stack;
+    if (typeof scheduled == "string") {
+        const index = scheduled.lastIndexOf("\n", scheduled.length - 1); // remove callback call
+        if (index != -1) scheduled = scheduled.slice(0, index);
+        e.stack = scheduled + scheduler;
     }
 }
 
