@@ -237,6 +237,9 @@ let remainingFrozenComparisonsDepth = maximumFrozenComparisonsDepth;
  */
 const recursiveFrozenComparisonGuard = new WeakSet();
 
+/** @type {(func: any, args: [any, ...any[]]) => any} */
+const apply = Function.prototype.apply.bind(Function.prototype.apply);
+
 //#endregion
 //#region Derived
 
@@ -260,10 +263,42 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
             return derivator(derived());
         }}[derivator.name]);
     },
+    cheap(derivator) {
+        if (typeof derivator !== "function") throw new TypeError("argument is not a function");
+        const derived = this;
+        return Derived.cheap({[derivator.name]() {
+            return derivator(derived());
+        }}[derivator.name]);
+    },
     prop(key) {
         const derived = this;
         return new Derived(function prop() {
             return derived()[key];
+        });
+    },
+    call() {
+        const args = [null];
+        args.push(...arguments);
+        const derived = this;
+        return new Derived(function call() {
+            apply(derived(), args);
+        });
+    },
+    callThis() {
+        const args = arguments;
+        const derived = this;
+        return new Derived(function callThis() {
+            apply(derived(), args);
+        });
+    },
+    method() {
+        const args = arguments;
+        const methodName = args[0];
+        const derived = this;
+        return new Derived(function method() {
+            const obj = derived();
+            args[0] = obj;
+            apply(obj[methodName], args);
         });
     },
     choose(truthy, falsy) {
@@ -284,6 +319,48 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
             return derived() || else_;
         });
     },
+    eq(value) {
+        const derived = this;
+        return new Derived(
+            value instanceof Derived
+            ? function eq() {
+                return is(derived(), value());
+            }
+            : function eq() {
+                return is(derived(), value);
+            }
+        );
+    },
+    neq(value) {
+        const derived = this;
+        return new Derived(
+            value instanceof Derived
+            ? function neq() {
+                return !is(derived(), value());
+            }
+            : function neq() {
+                return !is(derived(), value);
+            }
+        );
+    },
+    not() {
+        const derived = this;
+        return new Derived(function not() {
+            return !derived();
+        });
+    },
+    bool() {
+        const derived = this;
+        return new Derived(function bool() {
+            return !!derived();
+        });
+    },
+    length() {
+        const derived = this;
+        return new Derived(function length() {
+            return derived().length;
+        });
+    },
     coalesce(else_) {
         const derived = this;
         return new Derived(function coalesce() {
@@ -298,6 +375,42 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
             const value = derived();
             return value === null || value === undefined ? value : fmap(value);
         }}[fmap.name]);
+    },
+    resolved() {
+        const derived = this;
+        return new Derived(function resolved() {
+            return derived().$resolved();
+        });
+    },
+    rejected() {
+        const derived = this;
+        return new Derived(function rejected() {
+            return derived().$rejected();
+        });
+    },
+    settled() {
+        const derived = this;
+        return new Derived(function settled() {
+            return derived().$settled();
+        });
+    },
+    pending() {
+        const derived = this;
+        return new Derived(function pending() {
+            return !derived().$settled();
+        });
+    },
+    then(onfulfilled, onrejected) {
+        const derived = this;
+        return new Derived(function then() {
+            return track(derived().then(onfulfilled, onrejected));
+        });
+    },
+    catch(onrejected) {
+        const derived = this;
+        return new Derived({
+            catch() { return track(derived().catch(onrejected)); }
+        }["catch"]);
     },
     valueOf() {
         const value = this();
@@ -578,6 +691,28 @@ Derived.prototype = DerivedPrototype;
 const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
     constructor: State,
     now() {
+        let value = this[sym_value];
+        if (!(value instanceof Derived)) return value;
+        return Derived.now(function () {
+            do {
+                value = value();
+            } while (value instanceof Derived);
+            return value;
+        });
+    },
+    nested() {
+        if (current_derived) {
+            this[sym_ders].add(current_derived);
+            current_derived_used = true;
+        } else if (current_derived == undefined) {
+            const penalty = Derived.onUseDerivedOutsideOfDerivation;
+            const msg = this.name + " used outside of derivation";
+            if (penalty === "throw") throw new Error(msg);
+            if (typeof penalty == "function") penalty(msg);
+        }
+        return this[sym_value];
+    },
+    nestedNow() {
         return this[sym_value];
     },
     set(value) {
@@ -589,16 +724,30 @@ const StatePrototype = defineProperties({ __proto__: DerivedPrototype }, {
     },
     mut(transformer) {
         if (typeof transformer != "function") throw new TypeError("transformer is not a function");
-        const value = track(transformer(this[sym_value]));
-        if (!is(this[sym_value], value)) {
-            this[sym_value] = value;
-            invalidateDerivationSet(this[sym_ders]);
-        }
+        const self = this;
+        Derived.now(function () {
+            const value = track(transformer(self[sym_value]));
+            if (!is(self[sym_value], value)) {
+                self[sym_value] = value;
+                invalidateDerivationSet(self[sym_ders]);
+            }
+        });
     },
 });
 
 const StateViewPrototype = defineProperties({ __proto__: StatePrototype }, {
     now() {
+        const self = this;
+        return Derived.now(function () {
+            let value = self[sym_target][self[sym_key]];
+            while (value instanceof Derived) value = value;
+            return value;
+        });
+    },
+    nested() {
+        return this[sym_target][this[sym_key]];
+    },
+    nestedNow() {
         const self = this;
         return Derived.now(function () {
             return self[sym_target][self[sym_key]];
@@ -609,15 +758,27 @@ const StateViewPrototype = defineProperties({ __proto__: StatePrototype }, {
     },
     mut(transformer) {
         const self = this;
-        const value = transformer(Derived.now(function () {
-            return self[sym_target][self[sym_key]];
-        }));
-        this[sym_target][this[sym_key]] = value;
+        Derived.now(function () {
+            const target = self[sym_target];
+            const key = self[sym_key];
+            target[key] = transformer(target[key]);
+        });
     },
 });
 
 const StateProxyPrototype = defineProperties({ __proto__: StatePrototype }, {
     now() {
+        const self = this;
+        return Derived.now(function () {
+            let value = self[sym_getter]();
+            while (value instanceof Derived) value = value;
+            return value;
+        });
+    },
+    nested() {
+        return this[sym_getter]();
+    },
+    nestedNow() {
         const self = this;
         return Derived.now(function () {
             return self[sym_getter]();
@@ -628,10 +789,9 @@ const StateProxyPrototype = defineProperties({ __proto__: StatePrototype }, {
     },
     mut(transformer) {
         const self = this;
-        const value = Derived.now(function () {
-            return self[sym_getter]();
+        Derived.now(function () {
+            self[sym_setter](transformer(self[sym_getter]()));
         });
-        this[sym_setter](transformer(value));
     },
 });
 
@@ -654,7 +814,9 @@ function State(name, value) {
                 if (penalty === "throw") throw new Error(msg);
                 if (typeof penalty == "function") penalty(msg);
             }
-            return State[sym_value];
+            let value = State[sym_value];
+            while (value instanceof Derived) value = value;
+            return value;
         }
     })[name];
     Object.setPrototypeOf(State, new.target.prototype);
@@ -677,7 +839,9 @@ defineProperties(State, {
         if (typeof key != "string" && typeof key != "number" && typeof key != "symbol") throw new TypeError("State.prop can't use a value of type " + typeof key + " as a key");
         const State = ({
             [name]() {
-                return State[sym_target][State[sym_key]];
+                let value = State[sym_target][State[sym_key]];
+                while (value instanceof Derived) value = value();
+                return value;
             }
         })[name];
         Object.setPrototypeOf(State, StateViewPrototype);
@@ -697,7 +861,9 @@ defineProperties(State, {
         if (typeof setter != "function") throw new TypeError("setter is not a function");
         const State = ({
             [name]() {
-                return State[sym_getter]();
+                let value = State[sym_getter]();
+                while (value instanceof Derived) value = value();
+                return value;
             }
         })[name];
         Object.setPrototypeOf(State, StateProxyPrototype);
@@ -716,6 +882,18 @@ defineProperties(State, {
 })
 
 State.prototype = StatePrototype;
+
+function use_state(state) {
+    if (current_derived) {
+        state[sym_ders].add(current_derived);
+        current_derived_used = true;
+    } else if (current_derived == undefined) {
+        const penalty = Derived.onUseDerivedOutsideOfDerivation;
+        const msg = state.name + " used outside of derivation";
+        if (penalty === "throw") throw new Error(msg);
+        if (typeof penalty == "function") penalty(msg);
+    }
+}
 
 //#endregion State
 //#region Effect

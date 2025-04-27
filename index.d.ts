@@ -32,11 +32,28 @@ export interface Derived<out T> {
      */
     derive<U>(derivator: (value: T) => U): Derived<Derived.Use<U>>;
 
+    /** **Summary**: derive a new value from this one in a more concise and readable manner, using a cheap derivation instead of a regular one
+     *
+     * see {@link Derived.cheap} for more information on cheap derivations
+     *
+     * `a.cheap(x => f(x))` is equivalent to `Derived.cheap(() => f(a()))`
+     */
+    cheap<U>(derivator: (value: T) => U): Derived<Derived.Use<U>>;
+
     /** **Summary**: get a derived with the value of a property of the object stored
      *
      * `a.prop("b")` is equivalent to `a.derive(x => x["b"])`
      */
     prop<K extends keyof T>(key: K): Derived<Derived.Use<T[K]>>;
+
+    /** **Summary**: shorthand for `this.derive(x => x(...args))` */
+    call(...args: T extends (...args: infer A) => any ? A : never): T extends (...args: any) => infer R ? Derived<Derived.Use<R>> : never;
+
+    /** **Summary**: shorthand for `this.derive(x => x.apply(thisArg, args))` */
+    callThis(thisArg: T extends (this: infer This, ...args: any) => any ? This : never, ...args: T extends (...args: infer A) => any ? A : never): T extends (...args: any) => infer R ? Derived<Derived.Use<R>> : never;
+
+    /** **Summary**: shorthand for `this.derive(x => x[methodName](...args))` */
+    method<K extends keyof T>(methodName: K, ...args: T[K] extends (...args: infer A) => any ? A : never): T[K] extends (...args: any) => infer R ? Derived<Derived.Use<R>> : never;
 
     /** **Summary**: shorthand for `this.derive(x => x ? truthy : falsy)` */
     choose<Truthy, Falsy>(truthy: Truthy, falsy: Falsy): Derived<Derived.Use<Truthy | Falsy>>;
@@ -47,6 +64,21 @@ export interface Derived<out T> {
     /** **Summary**: shorthand for `this.derive(x => x || else_)` */
     or<Else>(else_: Else): Derived<Derived.Use<Else | Exclude<T, (false | null | undefined | 0 | "")>>>;
 
+    /** **Summary**: shorthand for `this.derive(x => State.is(x, value))` */
+    eq(value: Derived.Or<T>): Derived<boolean>;
+
+    /** **Summary**: shorthand for `this.derive(x => !State.is(x, value))` */
+    neq(value: Derived.Or<T>): Derived<boolean>;
+
+    /** **Summary**: shorthand for `this.derive(x => !x)` */
+    not(): Derived<boolean>;
+
+    /** **Summary**: shorthand for `this.derive(x => !!x)` */
+    bool(): Derived<boolean>;
+
+    /** **Summary**: shorthand for `this.derive(x => x.length)` */
+    length(): Derived<T extends {length?: unknown} ? Derived.Use<T["length"]> : undefined>;
+
     /** **Summary**: shorthand for `this.derive(x => x === null || x === undefined ? else_ : x)` */
     coalesce<Else>(else_: Else): Derived<Derived.Use<Else | (T & {})>>;
 
@@ -54,6 +86,24 @@ export interface Derived<out T> {
      *
      * shorthand for `this.derive(x => x === null || x === undefined ? x : fmap(x))` */
     fmap<U>(fmap: (value: T & {}) => U): Derived<Derived.Use<U | (T & (null | undefined))>>;
+
+    /** **Summary**: shorthand for `this.derive(x => x.$resolved())` */
+    resolved(): T extends Promise<unknown> ? Derived<boolean> : never;
+
+    /** **Summary**: shorthand for `this.derive(x => x.$rejected())` */
+    rejected(): T extends Promise<unknown> ? Derived<boolean> : never;
+
+    /** **Summary**: shorthand for `this.derive(x => x.$settled())` */
+    settled(): T extends Promise<unknown> ? Derived<boolean> : never;
+
+    /** **Summary**: shorthand for `this.derive(x => !x.$settled())` */
+    pending(): T extends Promise<unknown> ? Derived<boolean> : never;
+
+    /** **Summary**: shorthand for `this.derive(x => x.then(onfulfilled, onrejected))` */
+    then<U, V = never>(onfulfilled: (value: Awaited<T>) => U | PromiseLike<U>, onrejected?: (reason: unknown) => V | PromiseLike<V>): T extends Promise<unknown> ? Derived<Promise<U | V>> : never;
+
+    /** **Summary**: shorthand for `this.derive(x => x.catch(onrejected))` */
+    catch<V = never>(onrejected: (reason: unknown) => V | PromiseLike<V>): T extends Promise<unknown> ? Derived<Promise<T | V>> : never;
 
     /** the name specified when creating this object */
     readonly name: string;
@@ -343,7 +393,7 @@ export namespace Derived {
  *
  * to hold state you may not necessarily need instances of `State`, you can use tracked objects too, use the State class when you need to store a primitive value
  */
-export interface State<in out T> extends Derived<T> {
+export interface State<in out T> extends Derived<Derived.Use<T>> {
     /** **Summary**: changes the value in this state
      *
      * **Reference**: if the new value is different from the current one according to {@link State.is} equality, then it does nothing, otherwise it sets the value and invalidates dependents (not transitive invalidation)
@@ -364,6 +414,13 @@ export interface State<in out T> extends Derived<T> {
      * don't clone the object unless necessary
      */
     mut(transform: (value: T) => T): void;
+    /** **Summary**: get the value assigned to this State
+     *
+     * this usually does the same as calling the state, but when the state contains a derivation or state, methods from derivation will recursively use the derivation or state, when you want the derivation or state underneath you can use nested
+     */
+    nested(): T;
+    /** **Summary**: get the value assigned to this State without creating dependencies */
+    nestedNow(): T;
     /** the name specified when creating this object */
     readonly name: string;
 }
