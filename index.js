@@ -750,7 +750,7 @@ const StateViewPrototype = defineProperties({ __proto__: StatePrototype }, {
         const self = this;
         return Derived.now(function () {
             let value = self[sym_target][self[sym_key]];
-            while (value instanceof Derived) value = value;
+            while (value instanceof Derived) value = value();
             return value;
         });
     },
@@ -781,7 +781,7 @@ const StateProxyPrototype = defineProperties({ __proto__: StatePrototype }, {
         const self = this;
         return Derived.now(function () {
             let value = self[sym_getter]();
-            while (value instanceof Derived) value = value;
+            while (value instanceof Derived) value = value();
             return value;
         });
     },
@@ -825,7 +825,7 @@ function State(name, value) {
                 if (typeof penalty == "function") penalty(msg);
             }
             let value = State[sym_value];
-            while (value instanceof Derived) value = value;
+            while (value instanceof Derived) value = value();
             return value;
         }
     })[name];
