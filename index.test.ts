@@ -1053,6 +1053,66 @@ describe("tracked promise", () => {
         await microtask;
         expect(() => now()).toThrow("reason");
     });
+    test("auto promise tracking works as expected variation 1", async () => {
+        // not tracked
+        const rp = Promise.resolve(null);
+        const [p, f, r] = promiseWithResolvers<null>();
+        const pending = new Derived(() => rp.$pending()).or(new Derived(() => p.$pending()));
+        expect(pending()).toBe(true);
+        await microtask;
+        expect(pending()).toBe(true);
+        f(null);
+        expect(pending()).toBe(true);
+        await microtask;
+        expect(pending()).toBe(false);
+    });
+    test("auto promise tracking works as expected variation 2", async () => {
+        // not tracked
+        const rp = Promise.resolve(null);
+        const [p, f, r] = promiseWithResolvers<null>();
+        const pending = new Derived(() => rp.$pending()).or(new Derived(() => p.$pending()));
+        expect(pending()).toBe(true);
+        f(null);
+        await microtask;
+        expect(pending()).toBe(true); // this trigger tracking
+        // await microtask;
+        // expect(pending()).toBe(true);
+        await microtask;
+        expect(pending()).toBe(false);
+    });
+    test("auto promise tracking works as expected variation 3", async () => {
+        // not tracked
+        const rp = Derived.from(Promise.resolve(null));
+        const [p, f, r] = promiseWithResolvers<null>();
+        const rpp = rp.pending();
+        const pp = new Derived(() => p.$pending());
+        const pending = new Derived(() => rpp() || pp);
+        expect(pending()).toBe(true);
+        await microtask;
+        expect(pending()).toBe(true);
+        f(null);
+        expect(pending()).toBe(true);
+        expect(p.$pending()).toBe(true);
+        await microtask;
+        expect(p.$pending()).toBe(false);
+        expect(pending()).toBe(false);
+    });
+    test("auto promise tracking works as expected variation 4", async () => {
+        // not tracked
+        const rp = Derived.from(Promise.resolve(null));
+        const [p, f, r] = promiseWithResolvers<null>();
+        const rpp = rp.pending();
+        const pp = new Derived(() => p.$pending());
+        const pending = new Derived(() => rp().$pending() || pp);
+        expect(pending()).toBe(true);
+        f(null);
+        expect(pending()).toBe(true);
+        await microtask;
+        expect(p.$pending()).toBe(true); // this triggers tracking
+        await microtask;
+        expect(p.$pending()).toBe(false);
+        expect(pending()).toBe(false);
+    });
 });
 
 describe("tracked map", () => {

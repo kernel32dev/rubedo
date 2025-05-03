@@ -405,7 +405,7 @@ const DerivedPrototype = defineProperties({ __proto__: Function.prototype }, {
     pending() {
         const derived = this;
         return new Derived(function pending() {
-            return !derived().$settled();
+            return derived().$pending();
         });
     },
     then(onfulfilled, onrejected) {
@@ -3260,8 +3260,12 @@ defineProperties(StatePromise, {
     },
     resolve(value) {
         const promise = Promise.resolve(value);
-        Object.defineProperty(promise, sym_tracked, { value: promise });
-        Object.defineProperty(promise, sym_resolved, { value });
+        if (value !== promise && !(typeof value != "object" && value && typeof value.then == "function")) {
+            Object.defineProperty(promise, sym_tracked, { value: promise });
+            Object.defineProperty(promise, sym_resolved, { value });
+        } else {
+            track(promise);
+        }
         return promise;
     },
     reject(value) {
@@ -3413,6 +3417,12 @@ defineProperties(Promise.prototype, {
         promiseUseSetBySymbol(this, sym_ders_rejected);
         return false;
     },
+    $pending() {
+        if (sym_resolved in this || sym_rejected in this) return false;
+        promiseUseSetBySymbol(this, sym_ders_resolved);
+        promiseUseSetBySymbol(this, sym_ders_rejected);
+        return true;
+    },
     $now() {
         if (sym_resolved in this) return this[sym_resolved];
         if (sym_rejected in this) throw this[sym_rejected];
@@ -3444,7 +3454,7 @@ function promiseUseSetBySymbol(promise, sym) {
         let set = promise[sym];
         if (!set) {
             set = new Set();
-            Object.defineProperty(track(promise), sym, {
+            Object.defineProperty(promise, sym, {
                 value: set,
                 writable: false,
                 enumerable: false,
@@ -3452,9 +3462,8 @@ function promiseUseSetBySymbol(promise, sym) {
             });
         }
         set.add(current_derived);
-    } else {
-        track(promise);
     }
+    track(promise);
 }
 
 //#endregion

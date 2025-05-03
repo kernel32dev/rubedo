@@ -96,7 +96,7 @@ export interface Derived<out T> {
     /** **Summary**: shorthand for `this.derive(x => x.$settled())` */
     settled(): T extends Promise<unknown> ? Derived<boolean> : never;
 
-    /** **Summary**: shorthand for `this.derive(x => !x.$settled())` */
+    /** **Summary**: shorthand for `this.derive(x => x.$pending())` */
     pending(): T extends Promise<unknown> ? Derived<boolean> : never;
 
     /** **Summary**: shorthand for `this.derive(x => x.then(onfulfilled, onrejected))` */
@@ -984,7 +984,7 @@ declare global {
          *
          * note that the value returned is updated by the tracker of rubedo state and might not be true even if the promise is resolved
          *
-         * if the value is true that means the promise is resolved, but if the value is false, that doesn't mean the promise isn't resolved
+         * if the value is true that means the promise is resolved, but if the value is false, that doesn't strictly always mean the promise isn't resolved
          *
          * it's that way because we can't look inside the promise to get its value synchronously, we can however add a handler to update a value we can read synchronously, and that is what we do
          *
@@ -999,7 +999,7 @@ declare global {
          *
          * note that the value returned is updated by the tracker of rubedo state and might not be true even if the promise is rejected
          *
-         * if the value is true that means the promise is rejected, but if the value is false, that doesn't mean the promise isn't rejected
+         * if the value is true that means the promise is rejected, but if the value is false, that doesn't strictly always mean the promise isn't rejected
          *
          * it's that way because we can't look inside the promise to get its value synchronously, we can however add a handler to update a value we can read synchronously, and that is what we do
          *
@@ -1012,9 +1012,9 @@ declare global {
          *
          * calling this inside a derivation will cause the derivation to notice when the promise is settled
          *
-         * note that the value returned is updated by the tracker of rubedo state and might not be true even if the promise is settled
+         * note that the value returned is updated by the tracker of rubedo state and might not be accurate even if the promise is settled
          *
-         * if the value is true that means the promise is settled, but if the value is false, that doesn't mean the promise isn't settled
+         * if the value is true that means the promise is settled, but if the value is false, that doesn't strictly always mean the promise isn't settled
          *
          * it's that way because we can't look inside the promise to get its value synchronously, we can however add a handler to update a value we can read synchronously, and that is what we do
          *
@@ -1023,6 +1023,21 @@ declare global {
          * the `$` indicates this is a method added by rubedo
          */
         $settled(): boolean;
+        /** returns true if this promise has not resolved or rejected yet
+         *
+         * calling this inside a derivation will cause the derivation to notice when the promise is settled
+         *
+         * note that the value returned is updated by the tracker of rubedo state and might not be accurate even if the promise is pending
+         *
+         * if the value is false that means the promise is not pending, but if the value is true, that doesn't strictly always mean the promise is pending
+         *
+         * it's that way because we can't look inside the promise to get its value synchronously, we can however add a handler to update a value we can read synchronously, and that is what we do
+         *
+         * however, because it notifies on change it is completely safe and correct to call this from derivations
+         *
+         * the `$` indicates this is a method added by rubedo
+         */
+        $pending(): this is { $value: undefined };
         /** if the promise is resolved, returns its value
          *
          * if the promise is rejected, throws the error
